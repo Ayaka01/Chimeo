@@ -1,3 +1,4 @@
+# routes/messages.py
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -6,10 +7,15 @@ from datetime import datetime
 
 from database import get_db
 from models.user import User
-from models.message import Message
+from models.pending_message import PendingMessage
 from services.auth_service import get_current_user
-from services.message_service import get_messages, create_message, get_or_create_chat_room
-from services.message_cleanup import mark_message_delivered, delete_delivered_messages
+from services.message_service import (
+    send_message,
+    get_pending_messages,
+    mark_message_delivered,
+    delete_delivered_messages
+)
+from services.friendship_service import are_friends
 from utils.websocket_manager import connection_manager
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -18,9 +24,8 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 
 
 class MessageCreate(BaseModel):
+    recipient_id: str
     text: str
-    chat_room_id: Optional[str] = None
-    recipient_id: Optional[str] = None
 
 # Response models
 
@@ -28,135 +33,111 @@ class MessageCreate(BaseModel):
 class MessageResponse(BaseModel):
     id: str
     sender_id: str
+    recipient_id: str
     text: str
     timestamp: datetime
-    chat_room_id: str
     delivered: bool
 
     class Config:
         orm_mode = True
 
-# Define background task to clean up delivered messages
-
-
-def cleanup_delivered_messages(db: Session, chat_room_id: Optional[str] = None):
-    delete_delivered_messages(db, chat_room_id)
-
 
 @router.post("/", response_model=MessageResponse)
-async def send_message(
+async def send_new_message(
     message_data: MessageCreate,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Send a new message"""
-    chat_room_id = message_data.chat_room_id
-
-    # If no chat room ID provided, create room with recipient
-    if not chat_room_id and message_data.recipient_id:
-        chat_room = get_or_create_chat_room(
-            db,
-            current_user.id,
-            message_data.recipient_id
-        )
-
-        if not chat_room:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Recipient not found"
-            )
-
-        chat_room_id = chat_room.id
-    elif not chat_room_id:
+    """Send a new message to a friend"""
+    # Verify users are friends
+    if not are_friends(db, current_user.id, message_data.recipient_id):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either chat_room_id or recipient_id must be provided"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only send messages to friends"
         )
 
-    # Get participants for the message
-    chat_room = get_or_create_chat_room(db, current_user.id, message_data.recipient_id)
-
-    # Ensure this is a valid one-to-one chat room
-    if not chat_room or len(chat_room.participants) != 2:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only one-to-one chat rooms are allowed"
-        )
-
-    participant_ids = [user.id for user in chat_room.participants]
-
-    # Ensure there are exactly two participants
-    if len(participant_ids) != 2:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Chat room must have exactly two participants"
-        )
-
-    # Create message in database
-    message = create_message(
+    # Create the message
+    message = send_message(
         db=db,
         sender_id=current_user.id,
-        text=message_data.text,
-        chat_room_id=chat_room_id,
-        participant_ids=participant_ids
+        recipient_id=message_data.recipient_id,
+        text=message_data.text
     )
 
-    # Prepare WebSocket message
-    message_data = {
-        "type": "new_message",
-        "data": {
-            "id": message.id,
-            "sender_id": message.sender_id,
-            "text": message.text,
-            "chat_room_id": message.chat_room_id,
-            "timestamp": message.timestamp.isoformat(),
-            "delivered": False
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to send message"
+        )
+
+    # Try to deliver message immediately if recipient is online
+    if connection_manager.is_user_online(message_data.recipient_id):
+        # Prepare message data
+        message_data = {
+            "type": "new_message",
+            "data": {
+                "id": message.id,
+                "sender_id": message.sender_id,
+                "text": message.text,
+                "timestamp": message.created_at.isoformat(),
+                "delivered": False
+            }
         }
-    }
 
-    # Broadcast to WebSocket connections
-    all_delivered = await connection_manager.broadcast_to_room(
-        message=message_data,
-        room_id=chat_room_id,
-        exclude_user=current_user.id
-    )
+        # Send to recipient
+        delivered = await connection_manager.send_personal_message(
+            message=message_data,
+            user_id=message_data.recipient_id
+        )
 
-    # If message was delivered to all recipients, we can delete it from our server
-    if all_delivered:
-        background_tasks.add_task(cleanup_delivered_messages, db, chat_room_id)
-        message.delivered = True
+        # If delivered, mark as delivered and schedule cleanup
+        if delivered:
+            message.delivered = True
+            db.commit()
+
+            # Send delivery notification to sender
+            delivery_notification = {
+                "type": "message_delivered",
+                "data": {
+                    "message_id": message.id
+                }
+            }
+
+            await connection_manager.send_personal_message(
+                message=delivery_notification,
+                user_id=current_user.id
+            )
+
+            # Schedule cleanup of delivered messages
+            background_tasks.add_task(delete_delivered_messages, db)
 
     return message
 
 
-@router.get("/{chat_room_id}", response_model=List[MessageResponse])
-async def get_chat_messages(
-    chat_room_id: str,
-    limit: int = 50,
-    offset: int = 0,
+@router.get("/pending", response_model=List[MessageResponse])
+async def get_pending_messages_for_user(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get undelivered messages for a chat room"""
-    # Only return undelivered messages
-    messages = db.query(Message).filter(
-        Message.chat_room_id == chat_room_id,
-        Message.delivered == False
-    ).order_by(Message.timestamp.desc()).offset(offset).limit(limit).all()
-
+    """Get all pending messages for the current user"""
+    messages = get_pending_messages(db, current_user.id, mark_delivered=False)
     return messages
 
 
-@router.post("/{message_id}/delivered")
-async def mark_as_delivered(
+@router.post("/delivered/{message_id}")
+async def mark_message_as_delivered(
     message_id: str,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Mark a message as delivered by client"""
-    message = db.query(Message).filter(Message.id == message_id).first()
+    """Mark a message as delivered"""
+    # Get the message
+    message = db.query(PendingMessage).filter(
+        PendingMessage.id == message_id,
+        PendingMessage.recipient_id == current_user.id
+    ).first()
 
     if not message:
         raise HTTPException(
@@ -164,27 +145,15 @@ async def mark_as_delivered(
             detail="Message not found"
         )
 
-    # Check if user is a participant
-    participant_ids = [user.id for user in message.participants]
-    if current_user.id not in participant_ids and current_user.id != message.sender_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this message"
-        )
-
     # Mark as delivered
     message.delivered = True
     db.commit()
 
-    # Schedule cleanup in background
-    background_tasks.add_task(cleanup_delivered_messages, db)
-
-    # Notify sender that message was delivered
+    # Send notification to sender
     delivery_notification = {
         "type": "message_delivered",
         "data": {
-            "message_id": message_id,
-            "chat_room_id": message.chat_room_id
+            "message_id": message_id
         }
     }
 
@@ -192,6 +161,9 @@ async def mark_as_delivered(
         message=delivery_notification,
         user_id=message.sender_id
     )
+
+    # Schedule cleanup
+    background_tasks.add_task(delete_delivered_messages, db)
 
     return {"status": "success"}
 
@@ -212,29 +184,78 @@ async def websocket_endpoint(
     # Accept connection
     await connection_manager.connect(websocket, user_id, db)
 
+    # Deliver any pending messages immediately
+    pending_messages = get_pending_messages(db, user_id, mark_delivered=False)
+
+    for message in pending_messages:
+        # Format message
+        message_data = {
+            "type": "new_message",
+            "data": {
+                "id": message.id,
+                "sender_id": message.sender_id,
+                "text": message.text,
+                "timestamp": message.created_at.isoformat(),
+                "delivered": False
+            }
+        }
+
+        # Send to user
+        await connection_manager.send_personal_message(message_data, user_id)
+
+        # Mark as delivered
+        message.delivered = True
+
+    # Commit delivery status
+    if pending_messages:
+        db.commit()
+
+        # Notify senders
+        for message in pending_messages:
+            delivery_notification = {
+                "type": "message_delivered",
+                "data": {
+                    "message_id": message.id
+                }
+            }
+
+            await connection_manager.send_personal_message(
+                message=delivery_notification,
+                user_id=message.sender_id
+            )
+
     try:
+        # Keep connection open and listen for client messages
         while True:
-            # Receive JSON data
             data = await websocket.receive_json()
 
-            # Process message data
-            if data.get("type") == "join_room":
-                room_id = data.get("room_id")
-                if room_id:
-                    connection_manager.join_room(room_id, user_id)
-
-            elif data.get("type") == "leave_room":
-                room_id = data.get("room_id")
-                if room_id:
-                    connection_manager.leave_room(room_id, user_id)
-
-            elif data.get("type") == "message_delivered":
+            # Process client messages
+            if data.get("type") == "message_delivered":
                 message_id = data.get("message_id")
                 if message_id:
-                    mark_message_delivered(db, message_id)
-                    # Clean up delivered messages
-                    connection_manager.cleanup_delivered_messages(user_id)
+                    # Mark message as delivered
+                    success = await connection_manager.mark_message_delivered(message_id, user_id)
+
+                    if success:
+                        # Notify sender
+                        message = db.query(PendingMessage).filter(PendingMessage.id == message_id).first()
+                        if message:
+                            delivery_notification = {
+                                "type": "message_delivered",
+                                "data": {
+                                    "message_id": message_id
+                                }
+                            }
+
+                            await connection_manager.send_personal_message(
+                                message=delivery_notification,
+                                user_id=message.sender_id
+                            )
+
+            # Heartbeat
+            elif data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
 
     except WebSocketDisconnect:
-        # Remove from connections on disconnect
+        # Handle disconnect
         connection_manager.disconnect(user_id)
