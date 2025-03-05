@@ -4,19 +4,23 @@ from sqlalchemy.orm import sessionmaker
 
 from config import DATABASE_URL
 
-# Create database engine
+# El engine es el objeto a partir del cual se interactua con la base de datos.
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
-# Create session factory
+# Devuelve una clase, no una instancia. Las transacciones no se realizan hasta que se llama a commit(). Se usara esta clase para crear sesiones con la base de datos.
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create base model class
+# Devuelve una clase, no una instancia. Define la estructura global de las tablas (modelos) de la base de datos. Todos los modelos deben heredar de esta clase.
 Base = declarative_base()
 
-# Dependency to get DB session
+# Es un generador que se encarga de abrir y cerrar conexiones con la base de datos
+
+
 def get_db():
-    db = SessionLocal()
+    db = SessionLocal()  # Instancia de clase de arriba
     try:
         yield db
     finally:
+        # Cierra la conexion con la base de datos, aunque salten excepciones
+        # La conexion se cierra una vez se ha respondido a la peticion
         db.close()

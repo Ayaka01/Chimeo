@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Table
+from sqlalchemy import Column, String, DateTime, ForeignKey, Table, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -12,15 +12,17 @@ message_participants = Table(
     Column('user_id', String, ForeignKey('users.id'), primary_key=True)
 )
 
+
 class Message(Base):
     __tablename__ = "messages"
-    
+
     id = Column(String, primary_key=True, index=True)
     sender_id = Column(String, ForeignKey("users.id"))
     chat_room_id = Column(String, ForeignKey("chat_rooms.id"))
     text = Column(String)
     timestamp = Column(DateTime, default=func.now())
-    
+    delivered = Column(Boolean, default=False)  # Flag to mark if message was delivered
+
     # Relationships
     sender = relationship("User")
     participants = relationship("User", secondary=message_participants)
