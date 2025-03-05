@@ -35,11 +35,17 @@ class MessageResponse(BaseModel):
     sender_id: str
     recipient_id: str
     text: str
-    timestamp: datetime
+    created_at: datetime
+    timestamp: datetime  # Make sure this matches the field name in PendingMessage
     delivered: bool
 
     class Config:
         orm_mode = True
+        # If using newer versions of Pydantic (v2+), use this instead:
+        # model_config = ConfigDict(from_attributes=True)
+
+        # Add field aliases if needed
+        def alias_generator(field_name): return "created_at" if field_name == "timestamp" else field_name
 
 
 @router.post("/", response_model=MessageResponse)
@@ -74,7 +80,7 @@ async def send_new_message(
     # Try to deliver message immediately if recipient is online
     if connection_manager.is_user_online(message_data.recipient_id):
         # Prepare message data
-        message_data = {
+        message_payload = {
             "type": "new_message",
             "data": {
                 "id": message.id,
@@ -87,7 +93,7 @@ async def send_new_message(
 
         # Send to recipient
         delivered = await connection_manager.send_personal_message(
-            message=message_data,
+            message=message_payload,
             user_id=message_data.recipient_id
         )
 
@@ -112,7 +118,18 @@ async def send_new_message(
             # Schedule cleanup of delivered messages
             background_tasks.add_task(delete_delivered_messages, db)
 
-    return message
+    # Create a response that matches the expected model
+    # This is needed if your SQLAlchemy model fields don't exactly match your response model
+    response = {
+        "id": message.id,
+        "sender_id": message.sender_id,
+        "recipient_id": message.recipient_id,
+        "text": message.text,
+        "created_at": message.created_at,  # Make sure this field exists
+        "delivered": message.delivered
+    }
+
+    return response
 
 
 @router.get("/pending", response_model=List[MessageResponse])

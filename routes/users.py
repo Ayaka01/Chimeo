@@ -195,11 +195,12 @@ async def get_received_friend_requests(
 
 
 @router.get("/friends/requests/sent", response_model=List[FriendRequestResponse])
-async def get_sent_friend_requests(
+def get_sent_friend_requests_route(  # Renamed function to avoid name conflict
     status: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get friend requests sent by the current user"""
+    # Direct call to the service function (which is not async)
     requests = get_sent_friend_requests(db, current_user.id, status)
     return requests
