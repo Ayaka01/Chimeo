@@ -8,7 +8,7 @@ from config import DATABASE_URL
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 # Devuelve una clase, no una instancia. Las transacciones no se realizan hasta que se llama a commit(). Se usara esta clase para crear sesiones con la base de datos.
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(autoflush=False, bind=engine)
 
 # Devuelve una clase, no una instancia. Define la estructura global de las tablas (modelos) de la base de datos. Todos los modelos deben heredar de esta clase.
 Base = declarative_base()

@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
+from schemas.auth_schemas import UserCreate, LoginRequest
 
 from database import get_db
 from services.auth_service import (
@@ -15,65 +15,27 @@ from services.auth_service import (
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
-# Request models
 
-
-class UserCreate(BaseModel):
-    username: str
-    email: EmailStr
-    password: str
-    display_name: str
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-@router.post("/register")
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
-    # Check if username already exists
-    existing_username = get_user_by_username(db, user_data.username)
-    if existing_username:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already taken"
+
+    try:
+        user = create_user(
+            db=db,
+            username=user_data.username,
+            email=user_data.email,
+            password=user_data.password,
+            display_name=user_data.display_name
         )
 
-    # Check if email already exists
-    existing_email = get_user_by_email(db, user_data.email)
-    if existing_email:
+        token = create_user_token(user)
+
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail=str(e)
         )
-
-    # Validate password
-    if len(user_data.password) < 6:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 6 characters long"
-        )
-
-    # Validate username
-    if len(user_data.username) < 3:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username must be at least 3 characters long"
-        )
-
-    # Create user
-    user = create_user(
-        db=db,
-        username=user_data.username,
-        email=user_data.email,
-        password=user_data.password,
-        display_name=user_data.display_name
-    )
-
-    # Create token
-    token = create_user_token(user)
 
     return token
 
@@ -81,10 +43,11 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login")
 async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     """User login endpoint"""
-    # Authenticate user
-    user = authenticate_user(db, login_data.email, login_data.password)
 
-    if not user:
+    try:
+        # Authenticate user
+        user = authenticate_user(db, login_data.email, login_data.password)
+    except:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -113,6 +76,7 @@ async def login_for_access_token(
 
     token = create_user_token(user)
 
+    # ¿No puedo simplemente devolver el token? O sea, ¿por qué necesito un diccionario?
     return {
         "access_token": token.access_token,
         "token_type": token.token_type,

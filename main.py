@@ -7,20 +7,19 @@ from database import engine, Base
 from routes import auth, users, messages
 from config import HOST, PORT
 
-# Create database tables
+# Se crean las tablas a partir de los modelos
 Base.metadata.create_all(bind=engine)
 
-# Initialize FastAPI app
 app = FastAPI(title="Chimeo API")
 
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Configuracion de CORS (solo para probar en web)
+# app.add_middleware(
+#    CORSMiddleware,
+#    allow_origins=["*"],  # In production, replace with specific origins
+#    allow_credentials=True,
+#    allow_methods=["*"],
+#    allow_headers=["*"],
+# )
 
 # Include routers
 app.include_router(auth.router)

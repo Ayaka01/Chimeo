@@ -21,7 +21,7 @@ from services.friendship_service import (
 
 router = APIRouter(prefix="/users", tags=["users"])
 
-# Response models
+# Models to be used to define request and response bodies (FastAPI)
 
 
 class UserResponse(BaseModel):
@@ -44,8 +44,6 @@ class FriendRequestResponse(BaseModel):
 
     class Config:
         orm_mode = True
-
-# Request models
 
 
 class FriendRequestCreate(BaseModel):

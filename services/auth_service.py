@@ -1,28 +1,17 @@
 # services/auth_service.py
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
 
 from database import get_db
 from models.user import User
+from services.exceptions import EmailNotFoundError, PasswordIncorrectError, UsernameNotFoundError
 from utils.password import verify_password, get_password_hash, create_access_token
 from config import SECRET_KEY, ALGORITHM
-
-# Token schema
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-    user_id: str
-    username: str
-    display_name: str
-
+from schemas.auth_schemas import Token
 
 # OAuth2 scheme for JWT token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -40,13 +29,14 @@ def get_user_by_username(db: Session, username: str):
 
 def create_user(db: Session, username: str, email: str, password: str, display_name: str):
     """Create a new user"""
-    # Check if username already exists
-    if get_user_by_username(db, username):
-        return None
 
-    # Check if email already exists
-    if get_user_by_email(db, email):
-        return None
+    existing_username = get_user_by_username(db, username)
+    if existing_username:
+        raise ValueError("Username already taken")
+
+    existing_email = get_user_by_email(db, email)
+    if existing_email:
+        raise ValueError("Email already registered")
 
     # Generate a unique ID
     user_id = str(uuid.uuid4())
@@ -77,10 +67,10 @@ def authenticate_user(db: Session, email: str, password: str):
     user = get_user_by_email(db, email)
 
     if not user:
-        return False
+        raise EmailNotFoundError(f"Email '{email}' not found")
 
     if not verify_password(password, user.hashed_password):
-        return False
+        raise PasswordIncorrectError("Incorrect password")
 
     # Update last seen
     user.last_seen = datetime.utcnow()
