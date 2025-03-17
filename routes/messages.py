@@ -24,7 +24,7 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 
 
 class MessageCreate(BaseModel):
-    recipient_id: str
+    recipient_username: str
     text: str
 
 # Response models
@@ -32,8 +32,8 @@ class MessageCreate(BaseModel):
 
 class MessageResponse(BaseModel):
     id: str
-    sender_id: str
-    recipient_id: str
+    sender_username: str
+    recipient_username: str
     text: str
     created_at: datetime
     timestamp: datetime  # Make sure this matches the field name in PendingMessage
@@ -57,7 +57,7 @@ async def send_new_message(
 ):
     """Send a new message to a friend"""
     # Verify users are friends
-    if not are_friends(db, current_user.id, message_data.recipient_id):
+    if not are_friends(db, current_user.username, message_data.recipient_username):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only send messages to friends"
@@ -66,8 +66,8 @@ async def send_new_message(
     # Create the message
     message = send_message(
         db=db,
-        sender_id=current_user.id,
-        recipient_id=message_data.recipient_id,
+        sender_username=current_user.username,
+        recipient_username=message_data.recipient_username,
         text=message_data.text
     )
 
@@ -78,13 +78,13 @@ async def send_new_message(
         )
 
     # Try to deliver message immediately if recipient is online
-    if connection_manager.is_user_online(message_data.recipient_id):
+    if connection_manager.is_user_online(message_data.recipient_username):
         # Prepare message data
         message_payload = {
             "type": "new_message",
             "data": {
                 "id": message.id,
-                "sender_id": message.sender_id,
+                "sender_username": message.sender_username,
                 "text": message.text,
                 "timestamp": message.created_at.isoformat(),
                 "delivered": False
@@ -94,7 +94,7 @@ async def send_new_message(
         # Send to recipient
         delivered = await connection_manager.send_personal_message(
             message=message_payload,
-            user_id=message_data.recipient_id
+            username=message_data.recipient_username
         )
 
         # If delivered, mark as delivered and schedule cleanup
@@ -112,7 +112,7 @@ async def send_new_message(
 
             await connection_manager.send_personal_message(
                 message=delivery_notification,
-                user_id=current_user.id
+                username=current_user.username
             )
 
             # Schedule cleanup of delivered messages
@@ -122,8 +122,8 @@ async def send_new_message(
     # This is needed if your SQLAlchemy model fields don't exactly match your response model
     response = {
         "id": message.id,
-        "sender_id": message.sender_id,
-        "recipient_id": message.recipient_id,
+        "sender_username": message.sender_username,
+        "recipient_username": message.recipient_username,
         "text": message.text,
         "created_at": message.created_at,  # Make sure this field exists
         "delivered": message.delivered
@@ -138,7 +138,7 @@ async def get_pending_messages_for_user(
     db: Session = Depends(get_db)
 ):
     """Get all pending messages for the current user"""
-    messages = get_pending_messages(db, current_user.id, mark_delivered=False)
+    messages = get_pending_messages(db, current_user.username, mark_delivered=False)
     return messages
 
 
@@ -153,7 +153,7 @@ async def mark_message_as_delivered(
     # Get the message
     message = db.query(PendingMessage).filter(
         PendingMessage.id == message_id,
-        PendingMessage.recipient_id == current_user.id
+        PendingMessage.recipient_username == current_user.username
     ).first()
 
     if not message:
@@ -176,7 +176,7 @@ async def mark_message_as_delivered(
 
     await connection_manager.send_personal_message(
         message=delivery_notification,
-        user_id=message.sender_id
+        username=message.sender_username
     )
 
     # Schedule cleanup
@@ -185,24 +185,24 @@ async def mark_message_as_delivered(
     return {"status": "success"}
 
 
-@router.websocket("/ws/{user_id}")
+@router.websocket("/ws/{username}")
 async def websocket_endpoint(
     websocket: WebSocket,
-    user_id: str,
+    username: str,
     db: Session = Depends(get_db)
 ):
     """WebSocket endpoint for real-time messaging"""
     # Check if user exists
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.username == username).first()
     if not user:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     # Accept connection
-    await connection_manager.connect(websocket, user_id, db)
+    await connection_manager.connect(websocket, username, db)
 
     # Deliver any pending messages immediately
-    pending_messages = get_pending_messages(db, user_id, mark_delivered=False)
+    pending_messages = get_pending_messages(db, username, mark_delivered=False)
 
     for message in pending_messages:
         # Format message
@@ -210,7 +210,7 @@ async def websocket_endpoint(
             "type": "new_message",
             "data": {
                 "id": message.id,
-                "sender_id": message.sender_id,
+                "sender_username": message.sender_username,
                 "text": message.text,
                 "timestamp": message.created_at.isoformat(),
                 "delivered": False
@@ -218,7 +218,7 @@ async def websocket_endpoint(
         }
 
         # Send to user
-        await connection_manager.send_personal_message(message_data, user_id)
+        await connection_manager.send_personal_message(message_data, username)
 
         # Mark as delivered
         message.delivered = True
@@ -238,7 +238,7 @@ async def websocket_endpoint(
 
             await connection_manager.send_personal_message(
                 message=delivery_notification,
-                user_id=message.sender_id
+                username=message.sender_username
             )
 
     try:
@@ -251,7 +251,7 @@ async def websocket_endpoint(
                 message_id = data.get("message_id")
                 if message_id:
                     # Mark message as delivered
-                    success = await connection_manager.mark_message_delivered(message_id, user_id)
+                    success = await connection_manager.mark_message_delivered(message_id, username)
 
                     if success:
                         # Notify sender
@@ -266,7 +266,7 @@ async def websocket_endpoint(
 
                             await connection_manager.send_personal_message(
                                 message=delivery_notification,
-                                user_id=message.sender_id
+                                username=message.sender_username
                             )
 
             # Heartbeat
@@ -275,4 +275,4 @@ async def websocket_endpoint(
 
     except WebSocketDisconnect:
         # Handle disconnect
-        connection_manager.disconnect(user_id)
+        connection_manager.disconnect(username)

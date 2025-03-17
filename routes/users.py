@@ -2,13 +2,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from pydantic import BaseModel
-from datetime import datetime
+from schemas.users_schemas import UserResponse, FriendRequestResponse, FriendRequestCreate, FriendRequestAction
 
 from database import get_db
 from models.user import User
-from models.friendship import FriendRequest
+from models.friendship import FriendRequest, Friendship
 from services.auth_service import get_current_user, get_user_by_username
+from services.exceptions import BadRequestError, RequestToYourselfError, UserNotFoundError
 from services.friendship_service import (
     create_friend_request,
     accept_friend_request,
@@ -16,43 +16,11 @@ from services.friendship_service import (
     get_user_friends,
     get_user_friend_requests,
     get_sent_friend_requests,
-    are_friends
+    are_friends,
+    search_users_by_query
 )
-
+from fastapi.logger import logger
 router = APIRouter(prefix="/users", tags=["users"])
-
-# Models to be used to define request and response bodies (FastAPI)
-
-
-class UserResponse(BaseModel):
-    id: str
-    username: str
-    display_name: str
-    last_seen: datetime
-
-    class Config:
-        orm_mode = True
-
-
-class FriendRequestResponse(BaseModel):
-    id: str
-    sender: UserResponse
-    recipient: UserResponse
-    status: str
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        orm_mode = True
-
-
-class FriendRequestCreate(BaseModel):
-    username: str
-
-
-class FriendRequestAction(BaseModel):
-    request_id: str
-    action: str  # "accept" or "reject"
 
 
 @router.get("/me", response_model=UserResponse)
@@ -68,13 +36,7 @@ async def search_users(
     db: Session = Depends(get_db)
 ):
     """Search for users by username or display name"""
-    # Search for users with matching username or display name
-    users = db.query(User).filter(
-        User.id != current_user.id,
-        (User.username.ilike(f"%{q}%") | User.display_name.ilike(f"%{q}%"))
-    ).limit(20).all()
-
-    return users
+    return search_users_by_query(db, q, current_user.username)  #
 
 
 @router.get("/friends", response_model=List[UserResponse])
@@ -83,8 +45,7 @@ async def get_friends(
     db: Session = Depends(get_db)
 ):
     """Get all friends of the current user"""
-    friends = get_user_friends(db, current_user.id)
-    return friends
+    return get_user_friends(db, current_user.username)
 
 
 @router.post("/friends/request", response_model=FriendRequestResponse)
@@ -94,48 +55,19 @@ async def send_friend_request(
     db: Session = Depends(get_db)
 ):
     """Send a friend request to another user"""
-    # Find user by username
-    recipient = get_user_by_username(db, request_data.username)
-
-    if not recipient:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-    # Verify not sending to self
-    if recipient.id == current_user.id:
+    try:
+        response = create_friend_request(db, current_user.username, request_data.username)
+    except BadRequestError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot send friend request to yourself"
+            detail=str(e)
         )
 
-    # Check if already friends
-    if are_friends(db, current_user.id, recipient.id):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already friends with this user"
-        )
-
-    # Send friend request
-    friend_request = create_friend_request(db, current_user.id, recipient.id)
-
-    if not friend_request:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not create friend request. It may already exist or there may be a pending request in the other direction."
-        )
-
-    # Fetch the request with relationships
-    if isinstance(friend_request, FriendRequest):
-        request = db.query(FriendRequest).filter(FriendRequest.id == friend_request.id).first()
-        return request
-    else:
-        # If we got a friendship back, they're already friends
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already friends with this user"
-        )
+    if isinstance(response, FriendRequest):
+        return FriendRequestResponse(status="pending")
+    # If the request had a reversed request
+    elif isinstance(response, Friendship):
+        return FriendRequestResponse(status="accepted")
 
 
 @router.post("/friends/respond", response_model=UserResponse)
@@ -147,7 +79,7 @@ async def respond_to_friend_request(
     """Accept or reject a friend request"""
     if action_data.action == "accept":
         # Accept the request
-        friendship = accept_friend_request(db, action_data.request_id, current_user.id)
+        friendship = accept_friend_request(db, action_data.request_id, current_user.username)
 
         if not friendship:
             raise HTTPException(
@@ -156,13 +88,13 @@ async def respond_to_friend_request(
             )
 
         # Return the new friend
-        friend_id = friendship.user1_id if friendship.user1_id != current_user.id else friendship.user2_id
-        friend = db.query(User).filter(User.id == friend_id).first()
+        friend_username = friendship.user1_username if friendship.user1_username != current_user.username else friendship.user2_username
+        friend = db.query(User).filter(User.username == friend_username).first()
         return friend
 
     elif action_data.action == "reject":
         # Reject the request
-        result = reject_friend_request(db, action_data.request_id, current_user.id)
+        result = reject_friend_request(db, action_data.request_id, current_user.username)
 
         if not result:
             raise HTTPException(
@@ -171,7 +103,7 @@ async def respond_to_friend_request(
             )
 
         # Return the user who sent the request
-        user = db.query(User).filter(User.id == result.sender_id).first()
+        user = db.query(User).filter(User.username == result.sender_username).first()
         return user
 
     else:
@@ -188,7 +120,7 @@ async def get_received_friend_requests(
     db: Session = Depends(get_db)
 ):
     """Get friend requests received by the current user"""
-    requests = get_user_friend_requests(db, current_user.id, status)
+    requests = get_user_friend_requests(db, current_user.username, status)
     return requests
 
 
@@ -200,5 +132,5 @@ def get_sent_friend_requests_route(  # Renamed function to avoid name conflict
 ):
     """Get friend requests sent by the current user"""
     # Direct call to the service function (which is not async)
-    requests = get_sent_friend_requests(db, current_user.id, status)
+    requests = get_sent_friend_requests(db, current_user.username, status)
     return requests

@@ -10,12 +10,12 @@ class PendingMessage(Base):
     __tablename__ = "pending_messages"
 
     id = Column(String, primary_key=True, index=True)
-    sender_id = Column(String, ForeignKey("users.id"), nullable=False)
-    recipient_id = Column(String, ForeignKey("users.id"), nullable=False)
+    sender_username = Column(String, ForeignKey("users.username"), nullable=False)
+    recipient_username = Column(String, ForeignKey("users.username"), nullable=False)
     text = Column(String, nullable=False)
     created_at = Column(DateTime, default=func.now())
     delivered = Column(Boolean, default=False)
 
     # Relationships
-    sender = relationship("User", foreign_keys=[sender_id])
-    recipient = relationship("User", foreign_keys=[recipient_id])
+    sender = relationship("User", foreign_keys=[sender_username])
+    recipient = relationship("User", foreign_keys=[recipient_username])

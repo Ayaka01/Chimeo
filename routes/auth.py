@@ -8,9 +8,7 @@ from database import get_db
 from services.auth_service import (
     authenticate_user,
     create_user,
-    create_user_token,
-    get_user_by_email,
-    get_user_by_username
+    create_user_token
 )
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -28,8 +26,10 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
             password=user_data.password,
             display_name=user_data.display_name
         )
-
+        print("DESPUES DE CREAR USUARIO")
         token = create_user_token(user)
+        print("HOLAAAAAAAAA")
+        print(token)
 
     except ValueError as e:
         raise HTTPException(
@@ -80,7 +80,6 @@ async def login_for_access_token(
     return {
         "access_token": token.access_token,
         "token_type": token.token_type,
-        "user_id": token.user_id,
         "username": token.username,
         "display_name": token.display_name
     }

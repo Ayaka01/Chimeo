@@ -1,5 +1,4 @@
 # services/auth_service.py
-import uuid
 from datetime import datetime, timedelta
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -8,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.user import User
-from services.exceptions import EmailNotFoundError, PasswordIncorrectError, UsernameNotFoundError
+from services.exceptions import EmailNotFoundError, PasswordIncorrectError
 from utils.password import verify_password, get_password_hash, create_access_token
 from config import SECRET_KEY, ALGORITHM
 from schemas.auth_schemas import Token
@@ -18,35 +17,29 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
 def get_user_by_email(db: Session, email: str):
-    """Get user by email from database"""
     return db.query(User).filter(User.email == email).first()
 
 
 def get_user_by_username(db: Session, username: str):
-    """Get user by username from database"""
     return db.query(User).filter(User.username == username).first()
 
 
 def create_user(db: Session, username: str, email: str, password: str, display_name: str):
-    """Create a new user"""
-
     existing_username = get_user_by_username(db, username)
     if existing_username:
+        print("EXISTING USERNAME")
         raise ValueError("Username already taken")
 
     existing_email = get_user_by_email(db, email)
     if existing_email:
+        print("EXISTING EMAIL")
         raise ValueError("Email already registered")
-
-    # Generate a unique ID
-    user_id = str(uuid.uuid4())
 
     # Hash the password
     hashed_password = get_password_hash(password)
 
     # Create the user object
     db_user = User(
-        id=user_id,
         username=username,
         email=email,
         hashed_password=hashed_password,
@@ -55,15 +48,17 @@ def create_user(db: Session, username: str, email: str, password: str, display_n
     )
 
     # Add and commit to database
+    print("ANTES ADD")
     db.add(db_user)
+    print("DESPUES ADD")
     db.commit()
     db.refresh(db_user)
-
+    print("ANTES RETURN")
+    print(db_user)
     return db_user
 
 
 def authenticate_user(db: Session, email: str, password: str):
-    """Authenticate a user by email and password"""
     user = get_user_by_email(db, email)
 
     if not user:
@@ -82,17 +77,16 @@ def authenticate_user(db: Session, email: str, password: str):
 def create_user_token(user: User):
     """Create JWT token for authenticated user"""
     access_token_expires = timedelta(minutes=60 * 24)  # 1 day
-
+    print("ANTES CREAR TOKEN")
     # Create token with user ID in the payload
-    access_token = create_access_token(
-        data={"sub": user.id},
+    access_token_created = create_access_token(
+        data={"sub": user.username},
         expires_delta=access_token_expires
     )
-
+    print("ANTES DE RETURN, DESPUES CREAR TOKEN")
     return Token(
-        access_token=access_token,
+        access_token=access_token_created,
         token_type="bearer",
-        user_id=user.id,
         username=user.username,
         display_name=user.display_name
     )
@@ -109,16 +103,16 @@ async def get_current_user(db: Session = Depends(get_db), token: str = Depends(o
     try:
         # Decode JWT token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
+        username: str = payload.get("sub")
 
-        if user_id is None:
+        if username is None:
             raise credentials_exception
 
     except JWTError:
         raise credentials_exception
 
     # Get user from database
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.username == username).first()
 
     if user is None:
         raise credentials_exception

@@ -8,7 +8,7 @@ from models.pending_message import PendingMessage
 from services.friendship_service import are_friends
 
 
-def create_pending_message(db: Session, sender_id: str, recipient_id: str, text: str):
+def create_pending_message(db: Session, sender_username: str, recipient_username: str, text: str):
     """Create a new pending message"""
     # Generate a unique ID
     message_id = str(uuid.uuid4())
@@ -16,8 +16,8 @@ def create_pending_message(db: Session, sender_id: str, recipient_id: str, text:
     # Create the message object
     message = PendingMessage(
         id=message_id,
-        sender_id=sender_id,
-        recipient_id=recipient_id,
+        sender_username=sender_username,
+        recipient_username=recipient_username,
         text=text,
         created_at=datetime.utcnow(),
         delivered=False
@@ -31,10 +31,10 @@ def create_pending_message(db: Session, sender_id: str, recipient_id: str, text:
     return message
 
 
-def get_pending_messages(db: Session, recipient_id: str, mark_delivered: bool = False):
+def get_pending_messages(db: Session, recipient_username: str, mark_delivered: bool = False):
     """Get pending messages for a user"""
     messages = db.query(PendingMessage).filter(
-        PendingMessage.recipient_id == recipient_id,
+        PendingMessage.recipient_username == recipient_username,
         PendingMessage.delivered == False
     ).all()
 
@@ -58,12 +58,12 @@ def mark_message_delivered(db: Session, message_id: str):
     return False
 
 
-def delete_delivered_messages(db: Session, user_id: str = None):
+def delete_delivered_messages(db: Session, user_username: str = None):
     """Delete delivered messages, optionally for a specific user"""
     query = db.query(PendingMessage).filter(PendingMessage.delivered == True)
 
-    if user_id:
-        query = query.filter(PendingMessage.recipient_id == user_id)
+    if user_username:
+        query = query.filter(PendingMessage.recipient_username == user_username)
 
     messages = query.all()
 
@@ -74,13 +74,13 @@ def delete_delivered_messages(db: Session, user_id: str = None):
     return len(messages)
 
 
-def send_message(db: Session, sender_id: str, recipient_id: str, text: str):
+def send_message(db: Session, sender_username: str, recipient_username: str, text: str):
     """Send a message from one user to another"""
     # Verify users are friends
-    if not are_friends(db, sender_id, recipient_id):
+    if not are_friends(db, sender_username, recipient_username):
         return None
 
     # Create pending message
-    message = create_pending_message(db, sender_id, recipient_id, text)
+    message = create_pending_message(db, sender_username, recipient_username, text)
 
     return message

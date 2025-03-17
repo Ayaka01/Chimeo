@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from models.message import Message
+from models.pending_message import Message
 
 
 def mark_message_delivered(db: Session, message_id: str):
@@ -12,12 +12,9 @@ def mark_message_delivered(db: Session, message_id: str):
     return False
 
 
-def delete_delivered_messages(db: Session, chat_room_id: str = None):
+def delete_delivered_messages(db: Session):
     """Delete all delivered messages, optionally for a specific chat room"""
     query = db.query(Message).filter(Message.delivered == True)
-
-    if chat_room_id:
-        query = query.filter(Message.chat_room_id == chat_room_id)
 
     messages = query.all()
     count = len(messages)
