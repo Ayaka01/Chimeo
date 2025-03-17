@@ -6,7 +6,7 @@ from sqlalchemy.sql import func
 from database import Base
 
 
-class PendingMessage(Base):
+class DbPendingMessage(Base):
     __tablename__ = "pending_messages"
 
     id = Column(String, primary_key=True, index=True)
@@ -17,5 +17,5 @@ class PendingMessage(Base):
     delivered = Column(Boolean, default=False)
 
     # Relationships
-    sender = relationship("User", foreign_keys=[sender_username])
-    recipient = relationship("User", foreign_keys=[recipient_username])
+    sender = relationship("DbUser", foreign_keys=[sender_username])
+    recipient = relationship("DbUser", foreign_keys=[recipient_username])

@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from database import get_db
-from models.user import User
-from models.pending_message import PendingMessage
+from models.user import DbUser
+from models.pending_message import DbPendingMessage
 from services.auth_service import get_current_user
 from services.message_service import (
     send_message,
@@ -52,7 +52,7 @@ class MessageResponse(BaseModel):
 async def send_new_message(
     message_data: MessageCreate,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Send a new message to a friend"""
@@ -134,7 +134,7 @@ async def send_new_message(
 
 @router.get("/pending", response_model=List[MessageResponse])
 async def get_pending_messages_for_user(
-    current_user: User = Depends(get_current_user),
+    current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get all pending messages for the current user"""
@@ -146,7 +146,7 @@ async def get_pending_messages_for_user(
 async def mark_message_as_delivered(
     message_id: str,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Mark a message as delivered"""
@@ -193,7 +193,7 @@ async def websocket_endpoint(
 ):
     """WebSocket endpoint for real-time messaging"""
     # Check if user exists
-    user = db.query(User).filter(User.username == username).first()
+    user = db.query(DbUser).filter(DbUser.username == username).first()
     if not user:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return

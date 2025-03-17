@@ -1,10 +1,10 @@
 from sqlalchemy.orm import Session
-from models.pending_message import Message
+from models.pending_message import DbPendingMessage
 
 
 def mark_message_delivered(db: Session, message_id: str):
     """Mark a message as delivered"""
-    message = db.query(Message).filter(Message.id == message_id).first()
+    message = db.query(DbPendingMessage).filter(DbPendingMessage.id == message_id).first()
     if message:
         message.delivered = True
         db.commit()
@@ -14,7 +14,7 @@ def mark_message_delivered(db: Session, message_id: str):
 
 def delete_delivered_messages(db: Session):
     """Delete all delivered messages, optionally for a specific chat room"""
-    query = db.query(Message).filter(Message.delivered == True)
+    query = db.query(DbPendingMessage).filter(DbPendingMessage.delivered == True)
 
     messages = query.all()
     count = len(messages)

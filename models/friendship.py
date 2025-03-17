@@ -6,7 +6,7 @@ from sqlalchemy.sql import func
 from database import Base
 
 
-class FriendRequest(Base):
+class DbFriendRequest(Base):
     __tablename__ = "friend_requests"
 
     id = Column(String, primary_key=True, index=True)
@@ -17,11 +17,11 @@ class FriendRequest(Base):
     updated_at = Column(DateTime, onupdate=func.now())
 
     # Relationships
-    sender = relationship("User", foreign_keys=[sender_username], back_populates="sent_friend_requests")
-    recipient = relationship("User", foreign_keys=[recipient_username], back_populates="received_friend_requests")
+    sender = relationship("DbUser", foreign_keys=[sender_username], back_populates="sent_friend_requests")
+    recipient = relationship("DbUser", foreign_keys=[recipient_username], back_populates="received_friend_requests")
 
 
-class Friendship(Base):
+class DbFriendship(Base):
     __tablename__ = "friendships"
 
     id = Column(String, primary_key=True, index=True)
@@ -35,5 +35,5 @@ class Friendship(Base):
     )
 
     # Relationships
-    user1 = relationship("User", foreign_keys=[user1_username])
-    user2 = relationship("User", foreign_keys=[user2_username])
+    user1 = relationship("DbUser", foreign_keys=[user1_username])
+    user2 = relationship("DbUser", foreign_keys=[user2_username])

@@ -5,17 +5,17 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
-from models.user import User
-from models.friendship import FriendRequest, Friendship
+from models.user import DbUser
+from models.friendship import DbFriendRequest, DbFriendship
 from services.auth_service import get_user_by_username
 from services.exceptions import AlreadyFriendsError, RequestSentAlreadyError, RequestToYourselfError, UserNotFoundError
 
 
-def search_users_by_query(db: Session, query: str, current_user_username: int, limit: int = 20) -> List[User]:
+def search_users_by_query(db: Session, query: str, current_user_username: int, limit: int = 20) -> List[DbUser]:
     """Search for users by username or display name, excluding the current user"""
-    return db.query(User).filter(
-        User.username != current_user_username,
-        (User.username.ilike(f"%{query}%") | User.display_name.ilike(f"%{query}%"))
+    return db.query(DbUser).filter(
+        DbUser.username != current_user_username,
+        (DbUser.username.ilike(f"%{query}%") | DbUser.display_name.ilike(f"%{query}%"))
     ).limit(limit).all()
 
 
@@ -24,10 +24,10 @@ def get_friendship(db: Session, user1_username: str, user2_username: str):
     # Sort user IDs to ensure consistent queries regardless of who is user1/user2
     user_usernames = sorted([user1_username, user2_username])
 
-    friendship = db.query(Friendship).filter(
+    friendship = db.query(DbFriendship).filter(
         and_(
-            Friendship.user1_username == user_usernames[0],
-            Friendship.user2_username == user_usernames[1]
+            DbFriendship.user1_username == user_usernames[0],
+            DbFriendship.user2_username == user_usernames[1]
         )
     ).first()
 
@@ -47,7 +47,7 @@ def create_friendship(db: Session, user1_username: str, user2_username: str):
     friendship_id = str(uuid.uuid4())
 
     # Create the friendship object
-    friendship = Friendship(
+    friendship = DbFriendship(
         id=friendship_id,
         user1_username=user_usernames[0],
         user2_username=user_usernames[1],
@@ -64,10 +64,10 @@ def create_friendship(db: Session, user1_username: str, user2_username: str):
 
 def get_friend_request(db: Session, sender_username: str, recipient_username: str):
     """Get a friend request between two users"""
-    return db.query(FriendRequest).filter(
+    return db.query(DbFriendRequest).filter(
         and_(
-            FriendRequest.sender_username == sender_username,
-            FriendRequest.recipient_username == recipient_username
+            DbFriendRequest.sender_username == sender_username,
+            DbFriendRequest.recipient_username == recipient_username
         )
     ).first()
 
@@ -103,7 +103,7 @@ def create_friend_request(db: Session, sender_username: str, recipient_username:
     request_id = str(uuid.uuid4())
 
     # Create the request object
-    friend_request = FriendRequest(
+    friend_request = DbFriendRequest(
         id=request_id,
         sender_username=sender_username,
         recipient_username=recipient_username,
@@ -122,7 +122,7 @@ def create_friend_request(db: Session, sender_username: str, recipient_username:
 def accept_friend_request(db: Session, request_id: str, recipient_username: str):
     """Accept a friend request and create a friendship"""
     # Get the request
-    friend_request = db.query(FriendRequest).filter(FriendRequest.id == request_id).first()
+    friend_request = db.query(DbFriendRequest).filter(DbFriendRequest.id == request_id).first()
 
     if not friend_request:
         return None
@@ -151,7 +151,7 @@ def accept_friend_request(db: Session, request_id: str, recipient_username: str)
 def reject_friend_request(db: Session, request_id: str, recipient_username: str):
     """Reject a friend request"""
     # Get the request
-    friend_request = db.query(FriendRequest).filter(FriendRequest.id == request_id).first()
+    friend_request = db.query(DbFriendRequest).filter(DbFriendRequest.id == request_id).first()
 
     if not friend_request:
         return None
@@ -171,12 +171,11 @@ def reject_friend_request(db: Session, request_id: str, recipient_username: str)
 
 
 def get_user_friends(db: Session, username: str):
-    """Get all friends of a user"""
     # Query friendships where user is either user1 or user2
-    friendships = db.query(Friendship).filter(
+    friendships = db.query(DbFriendship).filter(
         or_(
-            Friendship.user1_username == username,
-            Friendship.user2_username == username
+            DbFriendship.user1_username == username,
+            DbFriendship.user2_username == username
         )
     ).all()
 
@@ -184,7 +183,7 @@ def get_user_friends(db: Session, username: str):
     friends = []
     for friendship in friendships:
         friend_username = friendship.user2_username if friendship.user1_username == username else friendship.user1_username
-        friend = db.query(User).filter(User.username == friend_username).first()
+        friend = db.query(DbUser).filter(DbUser.username == friend_username).first()
         if friend:
             friends.append(friend)
 
@@ -192,25 +191,22 @@ def get_user_friends(db: Session, username: str):
 
 
 def get_user_friend_requests(db: Session, username: str, status: str = None):
-    """Get friend requests for a user with optional status filter"""
-    query = db.query(FriendRequest).filter(FriendRequest.recipient_username == username)
+    query = db.query(DbFriendRequest).filter(DbFriendRequest.recipient_username == username)
 
     if status:
-        query = query.filter(FriendRequest.status == status)
+        query = query.filter(DbFriendRequest.status == status)
 
     return query.all()
 
 
 def get_sent_friend_requests(db: Session, username: str, status: str = None):
-    """Get friend requests sent by a user with optional status filter"""
-    query = db.query(FriendRequest).filter(FriendRequest.sender_username == username)
+    query = db.query(DbFriendRequest).filter(DbFriendRequest.sender_username == username)
 
     if status:
-        query = query.filter(FriendRequest.status == status)
+        query = query.filter(DbFriendRequest.status == status)
 
     return query.all()
 
 
 def are_friends(db: Session, user1_username: str, user2_username: str):
-    """Check if two users are friends"""
     return get_friendship(db, user1_username, user2_username) is not None

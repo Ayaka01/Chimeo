@@ -4,7 +4,6 @@ from pydantic import BaseModel
 
 
 class UserResponse(BaseModel):
-    id: str
     username: str
     display_name: str
     last_seen: datetime
@@ -14,7 +13,12 @@ class UserResponse(BaseModel):
 
 
 class FriendRequestResponse(BaseModel):
+    id: str
+    sender: UserResponse
+    recipient: UserResponse
     status: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         orm_mode = True
