@@ -5,8 +5,9 @@ from src.schemas.users_schemas import UserResponse, FriendRequestResponse, Frien
 from fastapi.responses import HTMLResponse
 from src.database import get_db
 from src.models.user import DbUser
-from src.models.friendship import DbFriendRequest, DbFriendship
+from src.models.friendship import DbFriendRequest
 from src.services.auth_service import get_current_user
+from src.services.exceptions import ChimeoError
 from src.services.friendship_service import (
     create_friend_request,
     accept_friend_request,
@@ -73,7 +74,7 @@ async def send_friend_request(
             recipient_username=request_data.username
         )
 
-    elif isinstance(response, DbFriendship):
+    else:
         logger.info(f"Friend request from {current_user.username} to {request_data.username} automatically accepted")
         return FriendRequestResponse(
             id=response.id,
@@ -81,6 +82,7 @@ async def send_friend_request(
             status="accepted",
             recipient_username=request_data.username
         )
+
 
 
 @router.post("/friends/respond", response_model=UserResponse)

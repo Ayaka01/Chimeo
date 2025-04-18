@@ -6,7 +6,6 @@ logger = logging.getLogger(__name__)
 
 
 def mark_message_delivered(db: Session, message_id: str):
-    """Mark a message as delivered"""
     try:
         message = db.query(DbPendingMessage).filter(DbPendingMessage.id == message_id).first()
         if message:
@@ -24,17 +23,6 @@ def mark_message_delivered(db: Session, message_id: str):
 
 
 def delete_delivered_messages(db: Session, user_username: str = None, cutoff_days: int = 30):
-    """
-    Delete delivered messages that are older than the cutoff.
-    
-    Args:
-        db: Database session
-        user_username: If provided, only delete messages for this user
-        cutoff_days: Age in days after which delivered messages are deleted
-        
-    Returns:
-        Number of deleted messages
-    """
     try:
         query = db.query(DbPendingMessage).filter(DbPendingMessage.delivered == True)
 
@@ -43,9 +31,6 @@ def delete_delivered_messages(db: Session, user_username: str = None, cutoff_day
                 (DbPendingMessage.sender_username == user_username) | 
                 (DbPendingMessage.recipient_username == user_username)
             )
-        
-        # We could add a date filter here if needed
-        # .filter(DbPendingMessage.created_at < (datetime.now() - timedelta(days=cutoff_days)))
 
         deleted_count = query.delete(synchronize_session=False)
         db.commit()

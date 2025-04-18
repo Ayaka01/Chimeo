@@ -30,7 +30,7 @@ async def auth_root():
              status_code=status.HTTP_201_CREATED, 
              response_model=Token)
 async def register(
-    request: Request,
+    _: Request,
     user_data: UserCreate, 
     db: Session = Depends(get_db)
 ):
@@ -39,7 +39,7 @@ async def register(
         user = create_user(
             db=db,
             username=user_data.username,
-            email=user_data.email,
+            email=str(user_data.email),
             password=user_data.password,
             display_name=user_data.display_name
         )
@@ -63,13 +63,13 @@ async def register(
 @router.post("/login", 
              response_model=Token)
 async def login(
-    request: Request,
+    _: Request,
     login_data: LoginRequest, 
     db: Session = Depends(get_db)
 ):
     try:
         logger.info(f"Authenticating user with email: {login_data.email}")
-        user = authenticate_user(db, login_data.email, login_data.password)
+        user = authenticate_user(db, str(login_data.email), login_data.password)
         token = create_user_token(user)
         return token
 

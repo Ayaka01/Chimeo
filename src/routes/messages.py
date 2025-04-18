@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime
+from datetime import datetime, UTC
 import json
 import asyncio
 import logging
@@ -17,7 +17,7 @@ from src.services.message_service import (
     get_pending_messages,
     mark_message_delivered,
 )
-from src.utils import connection_manager
+from src.utils.websocket_manager import connection_manager
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ async def create_message(
                     "sender_username": current_user.username,
                     "recipient_username": message_data.recipient_username,
                     "text": message_data.text,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "is_delivered": True
                 }
             }))
@@ -55,13 +55,12 @@ async def create_message(
                 "sender_username": current_user.username,
                 "recipient_username": message_data.recipient_username,
                 "text": message_data.text,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(UTC),
                 "is_delivered": True
             }
         except Exception as e:
             logger.error(f"Error delivering message via WebSocket: {e}")
     
-    # If WebSocket delivery fails, save to database
     logger.info(f"WebSocket delivery failed, saving message to database for {message_data.recipient_username}")
     message = send_message(
         db, 
@@ -89,7 +88,7 @@ async def create_message(
 @router.post("/delivered/{message_id}", status_code=status.HTTP_200_OK)
 async def mark_message_as_delivered(
     message_id: str,
-    current_user: DbUser = Depends(get_current_user),
+    _: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     success = mark_message_delivered(db, message_id)
@@ -191,7 +190,7 @@ async def send_pending_messages(websocket: WebSocket, username: str, db: Session
     
     return len(pending_messages)
 
-async def handle_client_messages(websocket: WebSocket, username: str, db: Session):
+async def handle_client_messages(websocket: WebSocket, db: Session):
     while True:
         data = await websocket.receive_text()
         message = json.loads(data)
@@ -238,7 +237,7 @@ async def websocket_endpoint(
     await send_pending_messages(websocket, username, db)
     
     try:
-        await handle_client_messages(websocket, username, db)
+        await handle_client_messages(websocket, db)
     except WebSocketDisconnect:
         connection_manager.disconnect(username)
     except Exception as e:

@@ -1,4 +1,3 @@
-# services/friendship_service.py
 from typing import List
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -11,7 +10,7 @@ from src.models.friendship import DbFriendRequest, DbFriendship, FriendRequestSt
 logger = logging.getLogger(__name__)
 
 
-def search_users_by_query(db: Session, query: str, current_user_username: str, limit: int = 20) -> List[DbUser]:
+def search_users_by_query(db: Session, query: str, current_user_username: str, limit: int = 20):
     sent_requests_subquery = db.query(DbFriendRequest.recipient_username).filter(
         DbFriendRequest.sender_username == current_user_username
     ).subquery()
@@ -29,7 +28,6 @@ def search_users_by_query(db: Session, query: str, current_user_username: str, l
 
 
 def get_friendship(db: Session, user1_username: str, user2_username: str):
-    # Sort user IDs to ensure consistent queries regardless of who is user1/user2
     user_usernames = sorted([user1_username, user2_username])
 
     friendship = db.query(DbFriendship).filter(
@@ -113,58 +111,45 @@ def create_friend_request(db: Session, sender_username: str, recipient_username:
 
 
 def accept_friend_request(db: Session, request_id: str, recipient_username: str):
-    """Accept a friend request and create a friendship"""
-    # Get the request
     friend_request = db.query(DbFriendRequest).filter(DbFriendRequest.id == request_id).first()
 
     if not friend_request:
         return None
 
-    # Verify the recipient is the one accepting
     if friend_request.recipient_username != recipient_username:
         return None
 
-    # Check if already accepted (Use Enum member)
     if friend_request.status == FriendRequestStatus.ACCEPTED:
         return get_friendship(db, friend_request.sender_username, friend_request.recipient_username)
 
-    # Update request status (Use Enum member)
     friend_request.status = FriendRequestStatus.ACCEPTED
-    friend_request.updated_at = datetime.utcnow()
+    friend_request.updated_at = datetime.now(datetime.UTC)
 
-    # Create friendship
     friendship = create_friendship(db, friend_request.sender_username, friend_request.recipient_username)
 
-    # Commit changes
     db.commit()
 
     return friendship
 
 
 def reject_friend_request(db: Session, request_id: str, recipient_username: str):
-    """Reject a friend request"""
-    # Get the request
     friend_request = db.query(DbFriendRequest).filter(DbFriendRequest.id == request_id).first()
 
     if not friend_request:
         return None
 
-    # Verify the recipient is the one rejecting
     if friend_request.recipient_username != recipient_username:
         return None
 
-    # Update request status (Use Enum member)
     friend_request.status = FriendRequestStatus.REJECTED
     friend_request.updated_at = datetime.utcnow()
 
-    # Commit changes
     db.commit()
 
     return friend_request
 
 
 def get_user_friends(db: Session, username: str):
-    # Query friendships where user is either user1 or user2
     friendships = db.query(DbFriendship).filter(
         or_(
             DbFriendship.user1_username == username,
@@ -172,7 +157,6 @@ def get_user_friends(db: Session, username: str):
         )
     ).all()
 
-    # Extract friend users
     friends = []
     for friendship in friendships:
         friend_username = friendship.user2_username if friendship.user1_username == username else friendship.user1_username

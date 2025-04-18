@@ -16,7 +16,7 @@ from src.services.exceptions import (
     WeakPasswordError,
     UsernameTooShortError
 )
-from src.utils import verify_password, get_password_hash, create_access_token, validate_password_strength
+from src.utils.password import verify_password, get_password_hash, create_access_token, validate_password_strength
 from src.config import SECRET_KEY, ALGORITHM
 from src.schemas.auth_schemas import Token
 

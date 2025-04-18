@@ -4,12 +4,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from starlette.responses import HTMLResponse
 
-from database import engine, Base
+from src.database import engine, Base
 from src.routes import users, messages, auth
-from src.config import CORS_ENABLED, CORS_ORIGINS, CORS_METHODS, CORS_HEADERS, API_DESCRIPTION
-from src.utils import handle_validation_error
-from src.utils import APIError
+from src.config import CORS_ENABLED, CORS_ORIGINS, CORS_METHODS, CORS_HEADERS, API_DESCRIPTION, configure_logging, \
+    DEBUG, LANDING_PAGE_HTML, HOST, PORT
+from src.utils.error_handler import handle_validation_error
+from src.utils.exceptions import APIError
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +100,21 @@ def create_application() -> FastAPI:
 
     return app
 
-app = create_application()
 
 def init_database():
     logger.info("Initializing database...")
-    Base.metadata.create_all(bind=engine) 
+    Base.metadata.create_all(bind=engine)
+
+configure_logging(level=logging.DEBUG if DEBUG else logging.INFO)
+logger = logging.getLogger(__name__)
+app = create_application()
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    logger.info("Root endpoint accessed")
+    return HTMLResponse(content=LANDING_PAGE_HTML)
+
+logger.info("Starting Chimeo API")
+init_database()
+
+logger.info(f"Starting server on {HOST}:{PORT}")
+
