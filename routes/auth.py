@@ -1,8 +1,9 @@
-# routes/auth.py
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from schemas.auth_schemas import UserCreate, LoginRequest
+from schemas.auth_schemas import UserCreate, LoginRequest, Token
 
 from database import get_db
 from services.auth_service import (
@@ -10,15 +11,32 @@ from services.auth_service import (
     create_user,
     create_user_token
 )
+from services.exceptions import (
+    RegistrationError,
+    AuthenticationError
+)
+from config import AUTH_ENDPOINTS_HTML
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    """Register a new user"""
+@router.get("/", response_class=HTMLResponse)
+async def auth_root():
+    return HTMLResponse(content=AUTH_ENDPOINTS_HTML)
 
+
+@router.post("/register", 
+             status_code=status.HTTP_201_CREATED, 
+             response_model=Token)
+async def register(
+    request: Request,
+    user_data: UserCreate, 
+    db: Session = Depends(get_db)
+):
     try:
+        logger.info(f"Registering user with email: {user_data.email}")
         user = create_user(
             db=db,
             username=user_data.username,
@@ -26,60 +44,47 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
             password=user_data.password,
             display_name=user_data.display_name
         )
-        print("DESPUES DE CREAR USUARIO")
         token = create_user_token(user)
-        print("HOLAAAAAAAAA")
-        print(token)
+        return token
 
-    except ValueError as e:
+    except RegistrationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-
-    return token
-
-
-@router.post("/login")
-async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
-    """User login endpoint"""
-
-    try:
-        # Authenticate user
-        user = authenticate_user(db, login_data.email, login_data.password)
-    except:
+        
+    except Exception as e:
+        logger.error(f"Unexpected error during registration: {e}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed due to an unexpected error"
         )
 
-    # Create and return token
-    token = create_user_token(user)
-    return token
 
-
-@router.post("/token")
-async def login_for_access_token(
-    form_data: OAuth2PasswordRequestForm = Depends(),
+@router.post("/login", 
+             response_model=Token)
+async def login(
+    request: Request,
+    login_data: LoginRequest, 
     db: Session = Depends(get_db)
 ):
-    """OAuth2 compatible token login endpoint"""
-    user = authenticate_user(db, form_data.username, form_data.password)
+    try:
+        logger.info(f"Authenticating user with email: {login_data.email}")
+        user = authenticate_user(db, login_data.email, login_data.password)
+        token = create_user_token(user)
+        return token
 
-    if not user:
+    except AuthenticationError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = create_user_token(user)
-
-    # ¿No puedo simplemente devolver el token? O sea, ¿por qué necesito un diccionario?
-    return {
-        "access_token": token.access_token,
-        "token_type": token.token_type,
-        "username": token.username,
-        "display_name": token.display_name
-    }
+    except Exception as e:
+        logger.error(f"Unexpected error during login: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication error",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

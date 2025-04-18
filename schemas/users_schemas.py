@@ -1,6 +1,31 @@
-from datetime import datetime
-from typing import Optional
 from pydantic import BaseModel
+from datetime import datetime
+from typing import List, Optional
+
+
+class UserBase(BaseModel):
+    username: str
+    email: str
+    display_name: str
+
+
+class UserDisplay(BaseModel):
+    username: str
+    display_name: str
+    created_at: datetime
+    last_seen: datetime
+
+
+class UserProfile(UserDisplay):
+    is_friend: bool
+    friend_request_status: Optional[str]
+
+
+class FriendDisplay(BaseModel):
+    username: str
+    display_name: str
+    last_seen: datetime
+    is_online: bool
 
 
 class UserResponse(BaseModel):
@@ -9,19 +34,14 @@ class UserResponse(BaseModel):
     last_seen: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class FriendRequestResponse(BaseModel):
     id: str
-    sender: UserResponse
-    recipient: UserResponse
+    sender_username: str
+    recipient_username: str
     status: str
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        orm_mode = True
 
 
 class FriendRequestCreate(BaseModel):
@@ -30,4 +50,4 @@ class FriendRequestCreate(BaseModel):
 
 class FriendRequestAction(BaseModel):
     request_id: str
-    action: str  # "accept" or "reject"
+    action: str  

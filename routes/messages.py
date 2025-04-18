@@ -1,189 +1,222 @@
-# routes/messages.py
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
 from datetime import datetime
+import json
+import asyncio
+import logging
+import uuid
 
 from database import get_db
 from models.user import DbUser
 from models.pending_message import DbPendingMessage
-from services.auth_service import get_current_user
+from schemas.messages_schemas import MessageCreate, MessageResponse
+from services.auth_service import get_current_user, decode_access_token
 from services.message_service import (
     send_message,
     get_pending_messages,
     mark_message_delivered,
-    delete_delivered_messages
 )
 from services.friendship_service import are_friends
 from utils.websocket_manager import connection_manager
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/messages", tags=["messages"])
 
-# Request models
-
-
-class MessageCreate(BaseModel):
-    recipient_username: str
-    text: str
-
-# Response models
-
-
-class MessageResponse(BaseModel):
-    id: str
-    sender_username: str
-    recipient_username: str
-    text: str
-    created_at: datetime
-    timestamp: datetime  # Make sure this matches the field name in PendingMessage
-    delivered: bool
-
-    class Config:
-        orm_mode = True
-        # If using newer versions of Pydantic (v2+), use this instead:
-        # model_config = ConfigDict(from_attributes=True)
-
-        # Add field aliases if needed
-        def alias_generator(field_name): return "created_at" if field_name == "timestamp" else field_name
-
-
 @router.post("/", response_model=MessageResponse)
-async def send_new_message(
+async def create_message(
     message_data: MessageCreate,
-    background_tasks: BackgroundTasks,
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Send a new message to a friend"""
-    # Verify users are friends
-    if not are_friends(db, current_user.username, message_data.recipient_username):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only send messages to friends"
-        )
+    # Generate a unique message ID
+    message_id = str(uuid.uuid4())  # Use UUID to generate a unique ID
 
-    # Create the message
+    # Try to send through WebSocket if recipient is connected
+    connection = connection_manager.get_connection(message_data.recipient_username)
+    
+    if connection:
+        try:
+            logger.info(f"Attempting to send message via WebSocket to {message_data.recipient_username}")
+            await connection.send_text(json.dumps({
+                "type": "new_message",
+                "data": {
+                    "id": message_id,
+                    "sender_username": current_user.username,
+                    "recipient_username": message_data.recipient_username,
+                    "text": message_data.text,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "is_delivered": True
+                }
+            }))
+            logger.info(f"Message delivered via WebSocket to {message_data.recipient_username}")
+            return {
+                "id": message_id,
+                "sender_username": current_user.username,
+                "recipient_username": message_data.recipient_username,
+                "text": message_data.text,
+                "created_at": datetime.utcnow(),
+                "is_delivered": True
+            }
+        except Exception as e:
+            logger.error(f"Error delivering message via WebSocket: {e}")
+    
+    # If WebSocket delivery fails, save to database
+    logger.info(f"WebSocket delivery failed, saving message to database for {message_data.recipient_username}")
     message = send_message(
-        db=db,
-        sender_username=current_user.username,
-        recipient_username=message_data.recipient_username,
-        text=message_data.text
+        db, 
+        current_user.username, 
+        message_data.recipient_username, 
+        message_data.text,
+        message_id=message_id  # Pass the generated ID to the send_message function
     )
-
+    
     if not message:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to send message"
+            detail="Failed to send message. Check that you are friends with the recipient."
         )
-
-    # Try to deliver message immediately if recipient is online
-    if connection_manager.is_user_online(message_data.recipient_username):
-        # Prepare message data
-        message_payload = {
-            "type": "new_message",
-            "data": {
-                "id": message.id,
-                "sender_username": message.sender_username,
-                "text": message.text,
-                "timestamp": message.created_at.isoformat(),
-                "delivered": False
-            }
-        }
-
-        # Send to recipient
-        delivered = await connection_manager.send_personal_message(
-            message=message_payload,
-            username=message_data.recipient_username
-        )
-
-        # If delivered, mark as delivered and schedule cleanup
-        if delivered:
-            message.delivered = True
-            db.commit()
-
-            # Send delivery notification to sender
-            delivery_notification = {
-                "type": "message_delivered",
-                "data": {
-                    "message_id": message.id
-                }
-            }
-
-            await connection_manager.send_personal_message(
-                message=delivery_notification,
-                username=current_user.username
-            )
-
-            # Schedule cleanup of delivered messages
-            background_tasks.add_task(delete_delivered_messages, db)
-
-    # Create a response that matches the expected model
-    # This is needed if your SQLAlchemy model fields don't exactly match your response model
-    response = {
+    
+    return {
         "id": message.id,
         "sender_username": message.sender_username,
         "recipient_username": message.recipient_username,
         "text": message.text,
-        "created_at": message.created_at,  # Make sure this field exists
-        "delivered": message.delivered
+        "created_at": message.created_at,
+        "is_delivered": message.delivered
     }
 
-    return response
-
+@router.post("/delivered/{message_id}", status_code=status.HTTP_200_OK)
+async def mark_message_as_delivered(
+    message_id: str,
+    current_user: DbUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    success = mark_message_delivered(db, message_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found"
+        )
+    
+    # Notify sender that message was delivered
+    message = db.query(DbPendingMessage).filter(DbPendingMessage.id == message_id).first()
+    
+    if message:
+        sender_connection = connection_manager.get_connection(message.sender_username)
+        if sender_connection:
+            try:
+                await sender_connection.send_text(json.dumps({
+                    "type": "message_delivered",
+                    "data": {
+                        "message_id": message_id
+                    }
+                }))
+            except Exception as e:
+                logger.error(f"Error notifying sender of delivery: {e}")
+    
+    return {"success": True}
 
 @router.get("/pending", response_model=List[MessageResponse])
 async def get_pending_messages_for_user(
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all pending messages for the current user"""
     messages = get_pending_messages(db, current_user.username, mark_delivered=False)
     return messages
 
+async def authenticate_websocket(websocket: WebSocket, username: str) -> bool:
+    try:
+        await websocket.accept()
+        data = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+        message = json.loads(data)
+        
+        if message.get("type") != "authenticate":
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": "Authentication required"
+            }))
+            return False
+            
+        token = message.get("token")
+        if not token:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": "Missing token"
+            }))
+            return False
+            
+        try:
+            payload = decode_access_token(token)
+            token_username = payload.get("sub")
+            
+            if token_username != username:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Username does not match token"
+                }))
+                return False
+                
+            return True
+        except Exception as e:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": f"Authentication failed: {str(e)}"
+            }))
+            return False
+    except asyncio.TimeoutError:
+        await websocket.send_text(json.dumps({
+            "type": "error",
+            "message": "Authentication timeout"
+        }))
+        return False
 
-@router.post("/delivered/{message_id}")
-async def mark_message_as_delivered(
-    message_id: str,
-    background_tasks: BackgroundTasks,
-    current_user: DbUser = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Mark a message as delivered"""
-    # Get the message
-    message = db.query(PendingMessage).filter(
-        PendingMessage.id == message_id,
-        PendingMessage.recipient_username == current_user.username
-    ).first()
+async def send_pending_messages(websocket: WebSocket, username: str, db: Session):
+    pending_messages = get_pending_messages(db, username)
+    for message in pending_messages:
+        await websocket.send_text(json.dumps({
+            "type": "new_message",
+            "data": {
+                "id": message.id,
+                "sender_username": message.sender_username,
+                "recipient_username": message.recipient_username,
+                "text": message.text,
+                "created_at": message.created_at.isoformat(),
+                "delivered": False
+            }
+        }))
+        
+        mark_message_delivered(db, message.id)
+    
+    return len(pending_messages)
 
-    if not message:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Message not found"
-        )
-
-    # Mark as delivered
-    message.delivered = True
-    db.commit()
-
-    # Send notification to sender
-    delivery_notification = {
-        "type": "message_delivered",
-        "data": {
-            "message_id": message_id
-        }
-    }
-
-    await connection_manager.send_personal_message(
-        message=delivery_notification,
-        username=message.sender_username
-    )
-
-    # Schedule cleanup
-    background_tasks.add_task(delete_delivered_messages, db)
-
-    return {"status": "success"}
-
+async def handle_client_messages(websocket: WebSocket, username: str, db: Session):
+    while True:
+        data = await websocket.receive_text()
+        message = json.loads(data)
+        
+        if message.get("type") == "ping":
+            await websocket.send_text(json.dumps({"type": "pong"}))
+        elif message.get("type") == "message_delivered":
+            message_id = message.get("message_id")
+            if message_id:
+                mark_message_delivered(db, message_id)
+                
+                delivered_message = db.query(DbPendingMessage).filter_by(id=message_id).first()
+                if delivered_message:
+                    delivery_payload = {
+                        "type": "message_delivered",
+                        "data": {
+                            "message_id": message_id
+                        }
+                    }
+                    
+                    await connection_manager.send_personal_message(
+                        delivery_payload, 
+                        delivered_message.sender_username
+                    )
 
 @router.websocket("/ws/{username}")
 async def websocket_endpoint(
@@ -191,88 +224,24 @@ async def websocket_endpoint(
     username: str,
     db: Session = Depends(get_db)
 ):
-    """WebSocket endpoint for real-time messaging"""
-    # Check if user exists
-    user = db.query(DbUser).filter(DbUser.username == username).first()
-    if not user:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    authenticated = await authenticate_websocket(websocket, username)
+    if not authenticated:
+        await websocket.close()
         return
-
-    # Accept connection
+    
+    await websocket.send_text(json.dumps({
+        "type": "connected",
+        "message": "Connected successfully"
+    }))
+    
     await connection_manager.connect(websocket, username, db)
-
-    # Deliver any pending messages immediately
-    pending_messages = get_pending_messages(db, username, mark_delivered=False)
-
-    for message in pending_messages:
-        # Format message
-        message_data = {
-            "type": "new_message",
-            "data": {
-                "id": message.id,
-                "sender_username": message.sender_username,
-                "text": message.text,
-                "timestamp": message.created_at.isoformat(),
-                "delivered": False
-            }
-        }
-
-        # Send to user
-        await connection_manager.send_personal_message(message_data, username)
-
-        # Mark as delivered
-        message.delivered = True
-
-    # Commit delivery status
-    if pending_messages:
-        db.commit()
-
-        # Notify senders
-        for message in pending_messages:
-            delivery_notification = {
-                "type": "message_delivered",
-                "data": {
-                    "message_id": message.id
-                }
-            }
-
-            await connection_manager.send_personal_message(
-                message=delivery_notification,
-                username=message.sender_username
-            )
-
+    
+    await send_pending_messages(websocket, username, db)
+    
     try:
-        # Keep connection open and listen for client messages
-        while True:
-            data = await websocket.receive_json()
-
-            # Process client messages
-            if data.get("type") == "message_delivered":
-                message_id = data.get("message_id")
-                if message_id:
-                    # Mark message as delivered
-                    success = await connection_manager.mark_message_delivered(message_id, username)
-
-                    if success:
-                        # Notify sender
-                        message = db.query(PendingMessage).filter(PendingMessage.id == message_id).first()
-                        if message:
-                            delivery_notification = {
-                                "type": "message_delivered",
-                                "data": {
-                                    "message_id": message_id
-                                }
-                            }
-
-                            await connection_manager.send_personal_message(
-                                message=delivery_notification,
-                                username=message.sender_username
-                            )
-
-            # Heartbeat
-            elif data.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
-
+        await handle_client_messages(websocket, username, db)
     except WebSocketDisconnect:
-        # Handle disconnect
+        connection_manager.disconnect(username)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
         connection_manager.disconnect(username)

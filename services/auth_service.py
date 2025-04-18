@@ -1,5 +1,6 @@
-# services/auth_service.py
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timedelta, UTC
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -7,88 +8,124 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.user import DbUser
-from services.exceptions import EmailNotFoundError, PasswordIncorrectError
-from utils.password import verify_password, get_password_hash, create_access_token
+from services.exceptions import (
+    EmailNotFoundError, 
+    PasswordIncorrectError,
+    UsernameExistsError,
+    EmailExistsError,
+    WeakPasswordError,
+    UsernameTooShortError
+)
+from utils.password import verify_password, get_password_hash, create_access_token, validate_password_strength
 from config import SECRET_KEY, ALGORITHM
 from schemas.auth_schemas import Token
 
-# OAuth2 scheme for JWT token
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+logger = logging.getLogger(__name__)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 
-def get_user_by_email(db: Session, email: str):
+def get_user_by_email(db: Session, email: str) -> DbUser | None:
     return db.query(DbUser).filter(DbUser.email == email).first()
 
 
-def get_user_by_username(db: Session, username: str):
+def get_user_by_username(db: Session, username: str) -> DbUser | None:
     return db.query(DbUser).filter(DbUser.username == username).first()
 
 
-def create_user(db: Session, username: str, email: str, password: str, display_name: str):
+def create_user(db: Session, username: str, email: str, password: str, display_name: str) -> DbUser:
+    if len(username) < 3:
+        logger.warning(f"Attempt to register with username shorter than 3 characters: '{username}'")
+        raise UsernameTooShortError("Username must be at least 3 characters long")
+
     existing_username = get_user_by_username(db, username)
     if existing_username:
-        raise ValueError("Username already taken")
+        logger.warning(f"Username '{username}' already taken")
+        raise UsernameExistsError("Username already taken")
 
     existing_email = get_user_by_email(db, email)
     if existing_email:
-        raise ValueError("Email already registered")
+        logger.warning(f"Email '{email}' already registered")
+        raise EmailExistsError("Email already registered")
+    
+    is_valid, error_message = validate_password_strength(password)
+    if not is_valid:
+        logger.warning(f"Weak password attempted for user: {username}")
+        raise WeakPasswordError(error_message)
 
-    # Hash the password
     hashed_password = get_password_hash(password)
 
-    # Create the user object
     db_user = DbUser(
         username=username,
         email=email,
         hashed_password=hashed_password,
         display_name=display_name,
-        last_seen=datetime.utcnow()
+        last_seen=datetime.now(UTC)
     )
 
-    # Add and commit to database
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    print(db_user)
-    return db_user
+    try:
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        logger.info(f"User created: {username}")
+        return db_user
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error creating user: {e}")
+        raise
 
 
-def authenticate_user(db: Session, email: str, password: str):
+def authenticate_user(db: Session, email: str, password: str) -> DbUser:
     user = get_user_by_email(db, email)
 
     if not user:
+        logger.warning(f"Authentication failed: Email '{email}' not found")
         raise EmailNotFoundError(f"Email '{email}' not found")
 
     if not verify_password(password, user.hashed_password):
+        logger.warning(f"Authentication failed: Incorrect password for '{email}'")
         raise PasswordIncorrectError("Incorrect password")
 
-    # Update last seen
-    user.last_seen = datetime.utcnow()
-    db.commit()
+    try:
+        user.last_seen = datetime.now(UTC)
+        db.commit()
+        logger.info(f"User authenticated: {user.username}")
+        return user
 
-    return user
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating last_seen for user {user.username}: {e}")
+        return user
 
 
-def create_user_token(user: DbUser):
-    """Create JWT token for authenticated user"""
-    access_token_expires = timedelta(minutes=60 * 24)  # 1 day
-    print("ANTES CREAR TOKEN")
-    # Create token with user ID in the payload
-    access_token_created = create_access_token(
+def create_user_token(user: DbUser) -> Token:
+    access_token_expires = timedelta(days=365 * 100)
+
+    access_token = create_access_token(
         data={"sub": user.username},
         expires_delta=access_token_expires
     )
-    print("ANTES DE RETURN, DESPUES CREAR TOKEN")
+    
+    logger.info(f"Token created for user: {user.username}")
     return Token(
-        access_token=access_token_created,
+        access_token=access_token,
         token_type="bearer",
         username=user.username,
         display_name=user.display_name
     )
 
 
-async def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)):
-    """Get current user from JWT token"""
+def decode_access_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError as e:
+        logger.warning(f"Token validation failed: {e}")
+        raise
+
+
+async def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> DbUser:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -96,24 +133,26 @@ async def get_current_user(db: Session = Depends(get_db), token: str = Depends(o
     )
 
     try:
-        # Decode JWT token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
 
-        if username is None:
-            raise credentials_exception
 
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"Token validation failed: {e}")
         raise credentials_exception
 
-    # Get user from database
-    user = db.query(DbUser).filter(DbUser.username == username).first()
+    user = get_user_by_username(db, username)
 
     if user is None:
+        logger.warning(f"Token validation failed: user '{username}' not found")
         raise credentials_exception
 
-    # Update last seen
-    user.last_seen = datetime.utcnow()
-    db.commit()
+    try:
+        user.last_seen = datetime.now(UTC)
+        db.commit()
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating last_seen for user {user.username}: {e}")
 
     return user

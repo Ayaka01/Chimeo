@@ -1,34 +1,36 @@
-
-# services/exceptions.py
-class EmailNotFoundError(Exception):
-    """Raised when the username does not exist in the database."""
-    pass
-
-
-class PasswordIncorrectError(Exception):
-    """Raised when the password is incorrect."""
-    pass
+class ChimeoError(Exception):
+    """Base exception class for all Chimeo application errors."""
+    default_message: str = "An error occurred"
+    
+    def __init__(self, message: str | None = None):
+        self.message = message or self.default_message
+        super().__init__(self.message)
 
 
-class BadRequestError(Exception):
-    pass
+class AuthenticationError(ChimeoError):
+    """Base class for authentication-related errors."""
+    default_message = "Authentication failed"
+
+class EmailNotFoundError(AuthenticationError):
+    default_message = "Email not found"
+
+class PasswordIncorrectError(AuthenticationError):
+    default_message = "Incorrect password"
 
 
-class UserNotFoundError(BadRequestError):
-    """Raised when the user does not exist in the database."""
-    pass
+class RegistrationError(ChimeoError):
+    """Base class for registration-related errors."""
+    default_message = "Registration failed"
 
+class UsernameExistsError(RegistrationError):
+    default_message = "Username already taken"
 
-class RequestToYourselfError(BadRequestError):
-    """Raised when the user tries to send a friend request to themselves."""
-    pass
+class EmailExistsError(RegistrationError):
+    default_message = "Email already registered"
 
+class WeakPasswordError(RegistrationError):
+    default_message = "Password does not meet strength requirements"
 
-class RequestSentAlreadyError(BadRequestError):
-    """Raised when the user tries to send a friend request to the same user again."""
-    pass
-
-
-class AlreadyFriendsError(BadRequestError):
-    """Raised when the user tries to send a friend request to the same user again."""
+class UsernameTooShortError(RegistrationError):
+    default_message = "Username must be at least 3 characters long"
     pass
