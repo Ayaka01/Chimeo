@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List
-from schemas.users_schemas import UserResponse, FriendRequestResponse, FriendRequestCreate, FriendRequestAction
+from src.schemas.users_schemas import UserResponse, FriendRequestResponse, FriendRequestCreate, FriendRequestAction
 from fastapi.responses import HTMLResponse
-from database import get_db
-from models.user import DbUser
-from models.friendship import DbFriendRequest, DbFriendship
-from services.auth_service import get_current_user
-from services.friendship_service import (
+from src.database import get_db
+from src.models.user import DbUser
+from src.models.friendship import DbFriendRequest, DbFriendship
+from src.services.auth_service import get_current_user
+from src.services.friendship_service import (
     create_friend_request,
     accept_friend_request,
     reject_friend_request,
@@ -16,7 +16,7 @@ from services.friendship_service import (
     get_sent_friend_requests,
     search_users_by_query
 )
-from config import USERS_ENDPOINTS_HTML
+from src.config import USERS_ENDPOINTS_HTML
 import logging 
 
 logger = logging.getLogger(__name__)

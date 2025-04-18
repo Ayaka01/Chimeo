@@ -1,4 +1,4 @@
-from config.settings import (
+from src.config.settings import (
     DATABASE_URL,
     SECRET_KEY,
     ALGORITHM,
@@ -13,8 +13,8 @@ from config.settings import (
     DEBUG
 )
 
-from config.logging import configure_logging
-from config.templates import (
+from src.config.logging import configure_logging
+from src.config.templates import (
     LANDING_PAGE_HTML,
     API_DESCRIPTION,
     AUTH_ENDPOINTS_HTML,

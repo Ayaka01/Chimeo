@@ -2,7 +2,7 @@ import logging
 import uvicorn
 from fastapi.responses import HTMLResponse
 
-from config import configure_logging, HOST, PORT, DEBUG, LANDING_PAGE_HTML
+from src.config import configure_logging, HOST, PORT, DEBUG, LANDING_PAGE_HTML
 
 if __name__ == "__main__":
     configure_logging(level=logging.DEBUG if DEBUG else logging.INFO)

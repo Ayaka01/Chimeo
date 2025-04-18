@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 import json
 import logging
 
-from services.message_service import mark_message_delivered
+from src.services.message_service import mark_message_delivered
 
 logger = logging.getLogger(__name__)
 

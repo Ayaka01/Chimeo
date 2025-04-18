@@ -25,7 +25,7 @@ sys.path.append(str(project_dir))
 
 # Import project settings
 try:
-    from config import DATABASE_URL
+    from src.config import DATABASE_URL
 except ImportError:
     logger.error("Could not import DATABASE_URL from config. Using default path.")
     DATABASE_URL = "sqlite:///./chimeo.db"

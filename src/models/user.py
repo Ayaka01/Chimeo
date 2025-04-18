@@ -3,11 +3,11 @@ User model for the Chimeo application.
 
 This module defines the database model for user accounts.
 """
-from sqlalchemy import Column, String, DateTime, UniqueConstraint
+from sqlalchemy import Column, String, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
-from database import Base
+from src.database import Base
 
 
 class DbUser(Base):

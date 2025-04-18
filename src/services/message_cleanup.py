@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from models.pending_message import DbPendingMessage
+from src.models.pending_message import DbPendingMessage
 import logging
 
 logger = logging.getLogger(__name__)

@@ -1,21 +1,20 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from schemas.auth_schemas import UserCreate, LoginRequest, Token
+from src.schemas.auth_schemas import UserCreate, LoginRequest, Token
 
-from database import get_db
-from services.auth_service import (
+from src.database import get_db
+from src.services.auth_service import (
     authenticate_user,
     create_user,
     create_user_token
 )
-from services.exceptions import (
+from src.services.exceptions import (
     RegistrationError,
     AuthenticationError
 )
-from config import AUTH_ENDPOINTS_HTML
+from src.config import AUTH_ENDPOINTS_HTML
 
 logger = logging.getLogger(__name__)
 

@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 import logging
 
-from models.user import DbUser
-from models.friendship import DbFriendRequest, DbFriendship, FriendRequestStatus
+from src.models.user import DbUser
+from src.models.friendship import DbFriendRequest, DbFriendship, FriendRequestStatus
 
 logger = logging.getLogger(__name__)
 

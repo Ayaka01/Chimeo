@@ -6,9 +6,9 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
-from database import get_db
-from models.user import DbUser
-from services.exceptions import (
+from src.database import get_db
+from src.models.user import DbUser
+from src.services.exceptions import (
     EmailNotFoundError, 
     PasswordIncorrectError,
     UsernameExistsError,
@@ -16,9 +16,9 @@ from services.exceptions import (
     WeakPasswordError,
     UsernameTooShortError
 )
-from utils.password import verify_password, get_password_hash, create_access_token, validate_password_strength
-from config import SECRET_KEY, ALGORITHM
-from schemas.auth_schemas import Token
+from src.utils import verify_password, get_password_hash, create_access_token, validate_password_strength
+from src.config import SECRET_KEY, ALGORITHM
+from src.schemas.auth_schemas import Token
 
 logger = logging.getLogger(__name__)
 

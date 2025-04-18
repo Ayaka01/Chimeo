@@ -6,10 +6,10 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
 from database import engine, Base
-from routes import auth, users, messages
-from config import CORS_ENABLED, CORS_ORIGINS, CORS_METHODS, CORS_HEADERS, API_DESCRIPTION
-from utils.error_handler import handle_validation_error
-from utils.exceptions import APIError
+from src.routes import users, messages, auth
+from src.config import CORS_ENABLED, CORS_ORIGINS, CORS_METHODS, CORS_HEADERS, API_DESCRIPTION
+from src.utils import handle_validation_error
+from src.utils import APIError
 
 logger = logging.getLogger(__name__)
 

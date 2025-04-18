@@ -1,4 +1,3 @@
-import uuid
 import logging
 from datetime import datetime
 from typing import List
@@ -6,8 +5,8 @@ from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
-from models.pending_message import DbPendingMessage
-from services.friendship_service import are_friends
+from src.models.pending_message import DbPendingMessage
+from src.services.friendship_service import are_friends
 
 logger = logging.getLogger(__name__)
 

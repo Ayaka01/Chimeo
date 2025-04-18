@@ -1,11 +1,10 @@
-import re
 from datetime import datetime, timedelta, UTC
 from typing import Dict, Optional, Any
 
 from jose import jwt
 from passlib.context import CryptContext
 
-from config import SECRET_KEY, ALGORITHM
+from src.config import SECRET_KEY, ALGORITHM
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

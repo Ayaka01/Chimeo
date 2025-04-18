@@ -1,24 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from typing import List
 from datetime import datetime
 import json
 import asyncio
 import logging
 import uuid
 
-from database import get_db
-from models.user import DbUser
-from models.pending_message import DbPendingMessage
-from schemas.messages_schemas import MessageCreate, MessageResponse
-from services.auth_service import get_current_user, decode_access_token
-from services.message_service import (
+from src.database import get_db
+from src.models.user import DbUser
+from src.models.pending_message import DbPendingMessage
+from src.schemas.messages_schemas import MessageCreate, MessageResponse
+from src.services.auth_service import get_current_user, decode_access_token
+from src.services.message_service import (
     send_message,
     get_pending_messages,
     mark_message_delivered,
 )
-from services.friendship_service import are_friends
-from utils.websocket_manager import connection_manager
+from src.utils import connection_manager
 
 logger = logging.getLogger(__name__)
 
