@@ -1,5 +1,5 @@
 from typing import List
-from datetime import datetime
+from datetime import datetime, UTC
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 import logging
@@ -49,7 +49,7 @@ def create_friendship(db: Session, user1_username: str, user2_username: str) -> 
     friendship = DbFriendship(
         user1_username=user_usernames[0],
         user2_username=user_usernames[1],
-        created_at=datetime.utcnow()
+        created_at=datetime.now(UTC)
     )
 
     try:
@@ -83,7 +83,7 @@ def create_friend_request(db: Session, sender_username: str, recipient_username:
     reverse_request = get_friend_request(db, recipient_username, sender_username)
     if reverse_request:
         reverse_request.status = FriendRequestStatus.ACCEPTED
-        reverse_request.updated_at = datetime.now(datetime.UTC)
+        reverse_request.updated_at = datetime.now(UTC)
         try:
             db.commit()
         except Exception as e:
@@ -123,7 +123,7 @@ def accept_friend_request(db: Session, request_id: str, recipient_username: str)
         return get_friendship(db, friend_request.sender_username, friend_request.recipient_username)
 
     friend_request.status = FriendRequestStatus.ACCEPTED
-    friend_request.updated_at = datetime.now(datetime.UTC)
+    friend_request.updated_at = datetime.now(UTC)
 
     friendship = create_friendship(db, friend_request.sender_username, friend_request.recipient_username)
 
@@ -142,7 +142,7 @@ def reject_friend_request(db: Session, request_id: str, recipient_username: str)
         return None
 
     friend_request.status = FriendRequestStatus.REJECTED
-    friend_request.updated_at = datetime.utcnow()
+    friend_request.updated_at = datetime.now(UTC)
 
     db.commit()
 
