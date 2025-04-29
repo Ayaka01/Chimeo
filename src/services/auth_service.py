@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from src.database import get_db
 from src.models.user import DbUser
-from src.services.exceptions import (
+from src.utils.exceptions import (
     EmailNotFoundError, 
     PasswordIncorrectError,
     UsernameExistsError,

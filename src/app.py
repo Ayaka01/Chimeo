@@ -13,8 +13,6 @@ from src.config import CORS_ENABLED, CORS_ORIGINS, CORS_METHODS, CORS_HEADERS, A
 from src.utils.error_handler import handle_validation_error
 from src.utils.exceptions import APIError
 
-logger = logging.getLogger(__name__)
-
 def create_application() -> FastAPI:
     app = FastAPI(
         title="Chimeo API",

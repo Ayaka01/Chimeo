@@ -16,7 +16,6 @@ class DbUser(Base):
     last_seen = Column(DateTime, default=func.now(), onupdate=func.now())
     created_at = Column(DateTime, default=func.now())
 
-    # Fields for refresh token storage
     hashed_refresh_token = Column(String, nullable=True)
     refresh_token_expires_at = Column(DateTime, nullable=True)
 

@@ -1,8 +1,6 @@
-import logging
 import uvicorn
-from fastapi.responses import HTMLResponse
 
-from src.config import configure_logging, HOST, PORT, DEBUG, LANDING_PAGE_HTML
+from src.config import HOST, PORT, DEBUG
 
 if __name__ == "__main__":
     uvicorn.run(
