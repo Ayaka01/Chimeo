@@ -145,6 +145,7 @@ def refresh_access_token(db: Session, provided_refresh_token: str) -> Token:
         raise AuthenticationError(detail=f"Invalid refresh token: {e}")
 
     user = get_user_by_username(db, username)
+
     if user is None:
         logger.warning(f"User '{username}' from refresh token not found.")
         raise AuthenticationError(detail="Invalid refresh token.")

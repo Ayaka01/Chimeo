@@ -3,6 +3,7 @@ from sqlalchemy import Column, String, DateTime, ForeignKey, UniqueConstraint, E
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
+import logging
 
 from src.database import Base
 

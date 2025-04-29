@@ -7,7 +7,6 @@ from src.database import get_db
 from src.models.user import DbUser
 from src.models.friendship import DbFriendRequest
 from src.services.auth_service import get_current_user
-from src.services.exceptions import ChimeoError
 from src.services.friendship_service import (
     create_friend_request,
     accept_friend_request,
@@ -18,7 +17,9 @@ from src.services.friendship_service import (
     search_users_by_query
 )
 from src.config import USERS_ENDPOINTS_HTML
-import logging 
+import logging
+
+from src.utils.exceptions import APIError
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ async def send_friend_request(
     logger.info(f"User {current_user.username} is sending friend request to {request_data.username}")
     try:
         response = create_friend_request(db, current_user.username, request_data.username)
-    except ChimeoError as e:
+    except APIError as e:
         logger.warning(f"Friend request from {current_user.username} to {request_data.username} failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

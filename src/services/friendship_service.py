@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Type, Any
 from datetime import datetime, UTC
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
@@ -10,14 +10,16 @@ from src.models.friendship import DbFriendRequest, DbFriendship, FriendRequestSt
 logger = logging.getLogger(__name__)
 
 
-def search_users_by_query(db: Session, query: str, current_user_username: str, limit: int = 20):
+def search_users_by_query(db: Session, query: str, current_user_username: str, limit: int = 20) -> list[Type[DbUser]]:
+    # All people we already sent a friendship request to
     sent_requests_subquery = db.query(DbFriendRequest.recipient_username).filter(
         DbFriendRequest.sender_username == current_user_username
-    ).subquery()
+    )
 
+    # All the people we are already friends with
     friends_subquery_1 = db.query(DbFriendship.user2_username).filter(DbFriendship.user1_username == current_user_username)
     friends_subquery_2 = db.query(DbFriendship.user1_username).filter(DbFriendship.user2_username == current_user_username)
-    friends_subquery = friends_subquery_1.union(friends_subquery_2).subquery()
+    friends_subquery = friends_subquery_1.union(friends_subquery_2)
 
     return db.query(DbUser).filter(
         DbUser.username != current_user_username,
@@ -27,7 +29,7 @@ def search_users_by_query(db: Session, query: str, current_user_username: str, l
     ).limit(limit).all()
 
 
-def get_friendship(db: Session, user1_username: str, user2_username: str):
+def get_friendship(db: Session, user1_username: str, user2_username: str) -> DbFriendship | None:
     user_usernames = sorted([user1_username, user2_username])
 
     friendship = db.query(DbFriendship).filter(
@@ -49,7 +51,6 @@ def create_friendship(db: Session, user1_username: str, user2_username: str) -> 
     friendship = DbFriendship(
         user1_username=user_usernames[0],
         user2_username=user_usernames[1],
-        created_at=datetime.now(UTC)
     )
 
     try:
@@ -79,17 +80,9 @@ def get_friend_request(db: Session, sender_username: str, recipient_username: st
     ).first()
 
 
-def create_friend_request(db: Session, sender_username: str, recipient_username: str):
+def create_friend_request(db: Session, sender_username: str, recipient_username: str) -> DbFriendRequest | None:
     reverse_request = get_friend_request(db, recipient_username, sender_username)
     if reverse_request:
-        reverse_request.status = FriendRequestStatus.ACCEPTED
-        reverse_request.updated_at = datetime.now(UTC)
-        try:
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error accepting reverse friend request from {recipient_username} to {sender_username}: {e}")
-            raise
         return create_friendship(db, sender_username, recipient_username)
 
     friend_request = DbFriendRequest(
@@ -110,7 +103,7 @@ def create_friend_request(db: Session, sender_username: str, recipient_username:
     return friend_request
 
 
-def accept_friend_request(db: Session, request_id: str, recipient_username: str):
+def accept_friend_request(db: Session, request_id: str, recipient_username: str) -> Type[DbFriendRequest] | None:
     friend_request = db.query(DbFriendRequest).filter(DbFriendRequest.id == request_id).first()
 
     if not friend_request:
@@ -119,20 +112,16 @@ def accept_friend_request(db: Session, request_id: str, recipient_username: str)
     if friend_request.recipient_username != recipient_username:
         return None
 
-    if friend_request.status == FriendRequestStatus.ACCEPTED:
-        return get_friendship(db, friend_request.sender_username, friend_request.recipient_username)
+    if friend_request.status != FriendRequestStatus.PENDING:
+        logger.warning(f"Attempt to accept non-pending request {request_id} by {recipient_username}. Status: {friend_request.status}")
+        raise ValueError(f"Friend request is not pending.")
 
-    friend_request.status = FriendRequestStatus.ACCEPTED
-    friend_request.updated_at = datetime.now(UTC)
-
-    friendship = create_friendship(db, friend_request.sender_username, friend_request.recipient_username)
-
-    db.commit()
+    friendship = create_friendship(db, str(friend_request.sender_username), str(friend_request.recipient_username))
 
     return friendship
 
 
-def reject_friend_request(db: Session, request_id: str, recipient_username: str):
+def reject_friend_request(db: Session, request_id: str, recipient_username: str) -> Type[DbFriendRequest] | None:
     friend_request = db.query(DbFriendRequest).filter(DbFriendRequest.id == request_id).first()
 
     if not friend_request:
@@ -142,14 +131,13 @@ def reject_friend_request(db: Session, request_id: str, recipient_username: str)
         return None
 
     friend_request.status = FriendRequestStatus.REJECTED
-    friend_request.updated_at = datetime.now(UTC)
 
     db.commit()
 
     return friend_request
 
 
-def get_user_friends(db: Session, username: str):
+def get_user_friends(db: Session, username: str) -> list[DbUser]:
     friendships = db.query(DbFriendship).filter(
         or_(
             DbFriendship.user1_username == username,
@@ -167,7 +155,7 @@ def get_user_friends(db: Session, username: str):
     return friends
 
 
-def get_user_friend_requests(db: Session, username: str) -> List[DbFriendRequest]:
+def get_user_friend_requests(db: Session, username: str) -> list[Type[DbFriendRequest]]:
     query = db.query(DbFriendRequest).filter(
         DbFriendRequest.recipient_username == username, 
         DbFriendRequest.status == FriendRequestStatus.PENDING)
@@ -175,7 +163,7 @@ def get_user_friend_requests(db: Session, username: str) -> List[DbFriendRequest
     return query.all()
 
 
-def get_sent_friend_requests(db: Session, username: str) -> List[DbFriendRequest]:
+def get_sent_friend_requests(db: Session, username: str) -> list[Type[DbFriendRequest]]:
     query = db.query(DbFriendRequest).filter(
         DbFriendRequest.sender_username == username,
         DbFriendRequest.status == FriendRequestStatus.PENDING)
