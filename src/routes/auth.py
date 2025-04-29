@@ -12,11 +12,9 @@ from src.services.auth_service import (
     create_and_store_tokens,
     refresh_access_token
 )
-from src.services.exceptions import (
-    RegistrationError,
-    AuthenticationError
-)
+
 from src.config import AUTH_ENDPOINTS_HTML
+from src.utils.exceptions import RegistrationError, AuthenticationError
 
 logger = logging.getLogger(__name__)
 

@@ -14,8 +14,12 @@ class LoginRequest(BaseModel):
 
     
 class Token(BaseModel):
-    access_token: str
-    token_type: str
     username: str
     display_name: str
+    token_type: str
+    access_token: str
     refresh_token: str
+
+
+
+

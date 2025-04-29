@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, UTC
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 
 from jose import jwt
 from passlib.context import CryptContext
@@ -36,26 +36,14 @@ def verify_token(plain_token: str, hashed_token: str) -> bool:
         return False
 
 
-def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+def create_token(data: Dict[str, Any], expires_delta: timedelta) -> str:
     to_encode = data.copy()
 
-    if expires_delta:
-        expire = datetime.now(UTC) + expires_delta
-    else:
-        expire = datetime.now(UTC) + timedelta(minutes=15)
-
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-    return encoded_jwt
-
-
-def create_refresh_token(data: dict, expires_delta: timedelta):
-    to_encode = data.copy()
     expire = datetime.now(UTC) + expires_delta
+
     to_encode.update({"exp": expire})
-    # Optionally add a claim to distinguish from access tokens, e.g., {"type": "refresh"}
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
     return encoded_jwt
 
 

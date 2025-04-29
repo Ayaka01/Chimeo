@@ -20,9 +20,8 @@ from src.utils.exceptions import (
 from src.utils.password import (
     verify_password, 
     get_password_hash, 
-    create_access_token, 
     validate_password_strength,
-    create_refresh_token,
+    create_token,
     get_token_hash,
     verify_token
 )
@@ -69,9 +68,6 @@ def create_user(db: Session, username: str, email: str, password: str, display_n
         email=email,
         hashed_password=hashed_password,
         display_name=display_name,
-        last_seen=datetime.now(UTC),
-        hashed_refresh_token=None,
-        refresh_token_expires_at=None
     )
 
     try:
@@ -107,10 +103,10 @@ def create_and_store_tokens(db: Session, user: DbUser) -> Token:
     refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     refresh_expire_time = datetime.now(UTC) + refresh_token_expires
 
-    access_token = create_access_token(
+    access_token = create_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    refresh_token = create_refresh_token(
+    refresh_token = create_token(
         data={"sub": user.username}, expires_delta=refresh_token_expires
     )
 
@@ -134,7 +130,7 @@ def create_and_store_tokens(db: Session, user: DbUser) -> Token:
     except Exception as e:
         db.rollback()
         logger.error(f"Error storing refresh token for user {user.username}: {e}")
-        raise AuthenticationError("Failed to finalize authentication session.")
+        raise AuthenticationError(detail="Failed to finalize authentication session.")
 
 
 def refresh_access_token(db: Session, provided_refresh_token: str) -> Token:
@@ -143,45 +139,70 @@ def refresh_access_token(db: Session, provided_refresh_token: str) -> Token:
         username: str = payload.get("sub")
         if username is None:
             logger.warning("Refresh token missing 'sub' claim.")
-            raise AuthenticationError("Invalid refresh token.")
+            raise AuthenticationError(detail="Invalid refresh token.")
     except JWTError as e:
         logger.warning(f"Refresh token validation failed: {e}")
-        raise AuthenticationError(f"Invalid refresh token: {e}")
+        raise AuthenticationError(detail=f"Invalid refresh token: {e}")
 
     user = get_user_by_username(db, username)
     if user is None:
         logger.warning(f"User '{username}' from refresh token not found.")
-        raise AuthenticationError("Invalid refresh token.")
+        raise AuthenticationError(detail="Invalid refresh token.")
 
     if not user.hashed_refresh_token or not user.refresh_token_expires_at:
         logger.warning(f"User '{username}' has no stored refresh token.")
-        raise AuthenticationError("Refresh token not found or revoked.")
+        raise AuthenticationError(detail="Refresh token not found or revoked.")
 
     if datetime.now(UTC) > user.refresh_token_expires_at:
         logger.warning(f"Refresh token expired for user '{username}'.")
-        raise AuthenticationError("Refresh token expired.")
+        user.hashed_refresh_token = None
+        user.refresh_token_expires_at = None
+        try:
+            db.commit()
+        except Exception as db_err:
+             db.rollback()
+             logger.error(f"Error clearing expired refresh token for {username}: {db_err}")
+        raise AuthenticationError(detail="Refresh token expired.")
 
     if not verify_token(provided_refresh_token, user.hashed_refresh_token):
-        logger.warning(f"Provided refresh token does not match stored hash for user '{username}'.")
-        raise AuthenticationError("Invalid refresh token.")
+        logger.warning(f"Provided refresh token does not match stored hash for user '{username}'. Invalidating.")
+        user.hashed_refresh_token = None
+        user.refresh_token_expires_at = None
+        try:
+            db.commit()
+        except Exception as db_err:
+             db.rollback()
+             logger.error(f"Error clearing mismatched refresh token for {username}: {db_err}")
+        raise AuthenticationError(detail="Invalid refresh token.")
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    new_access_token = create_access_token(
+    new_access_token = create_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
+
+    refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    new_refresh_token = create_token(
+        data={"sub": user.username}, expires_delta=refresh_token_expires
+    )
+    new_refresh_expire_time = datetime.now(UTC) + refresh_token_expires
+    
+    new_hashed_refresh = get_token_hash(new_refresh_token)
+    user.hashed_refresh_token = new_hashed_refresh
+    user.refresh_token_expires_at = new_refresh_expire_time
 
     user.last_seen = datetime.now(UTC)
     try:
         db.commit()
         db.refresh(user)
+        logger.info(f"Tokens refreshed (rotation) for user: {user.username}")
     except Exception as e:
         db.rollback()
-        logger.error(f"Error updating last_seen during token refresh for {user.username}: {e}")
+        logger.error(f"Error updating tokens/last_seen during token refresh for {user.username}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update session after token refresh.")
 
-    logger.info(f"Access token refreshed for user: {user.username}")
     return Token(
         access_token=new_access_token,
-        refresh_token=provided_refresh_token,
+        refresh_token=new_refresh_token,
         token_type="bearer",
         username=user.username,
         display_name=user.display_name
@@ -207,7 +228,9 @@ async def get_current_user(db: Session = Depends(get_db), token: str = Depends(o
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-
+        if username is None:
+             logger.warning("Access token missing 'sub' claim.")
+             raise credentials_exception
 
     except JWTError as e:
         logger.warning(f"Token validation failed: {e}")
