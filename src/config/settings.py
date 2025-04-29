@@ -10,7 +10,8 @@ DATABASE_URL: Final[str] = os.getenv("DATABASE_URL", "sqlite:///./chimeo.db")
 DEFAULT_SECRET_KEY = secrets.token_hex(32)
 SECRET_KEY: Final[str] = os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY)
 ALGORITHM: Final[str] = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES: Final[int] = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES: Final[int] = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))  # Default 30 minutes
+REFRESH_TOKEN_EXPIRE_DAYS: Final[int] = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")) # Default 7 days
 
 HOST: Final[str] = os.getenv("HOST", "0.0.0.0")
 PORT: Final[int] = int(os.getenv("PORT", "8000"))

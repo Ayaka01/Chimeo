@@ -61,7 +61,7 @@ async def send_friend_request(
     except ChimeoError as e:
         logger.warning(f"Friend request from {current_user.username} to {request_data.username} failed: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
 
@@ -98,7 +98,7 @@ async def respond_to_friend_request(
         if not friendship:
             logger.warning(f"User {current_user.username} failed to accept friend request {action_data.request_id}")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Could not accept friend request"
             )
 
@@ -113,7 +113,7 @@ async def respond_to_friend_request(
         if not result:
             logger.warning(f"User {current_user.username} failed to reject friend request {action_data.request_id}")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Could not reject friend request"
             )
 

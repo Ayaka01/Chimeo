@@ -4,9 +4,11 @@ from typing import List
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+import json
 
 from src.models.pending_message import DbPendingMessage
 from src.services.friendship_service import are_friends
+from src.utils.websocket_manager import connection_manager
 
 logger = logging.getLogger(__name__)
 
@@ -84,51 +86,39 @@ def get_pending_messages(
 
 
 def mark_message_delivered(db: Session, message_id: str) -> bool:
+    message = None
+    sender_username = None
     try:
         message = db.query(DbPendingMessage).filter(DbPendingMessage.id == message_id).first()
 
         if message:
-            message.delivered = True
-            db.delete(message)  # Delete the message after marking it as delivered
+            sender_username = message.sender_username
+            db.delete(message)
             db.commit()
-            logger.info(f"Message {message_id} marked as delivered and deleted")
+            logger.info(f"Message {message_id} marked as delivered and deleted from DB.")
+
+            if sender_username:
+                try:
+                    logger.info(f"Attempting to send delivery notification for {message_id} to sender {sender_username}")
+                    connection_manager.send_personal_message_sync(
+                        {"type": "message_delivered", "data": {"message_id": message_id}},
+                        sender_username
+                    )
+                except Exception as ws_error:
+                    logger.error(f"Failed to send delivery notification via WebSocket to {sender_username} for message {message_id}: {ws_error}")
             return True
 
-        logger.warning(f"Message {message_id} not found for delivery marking")
-        return False
-
-    except SQLAlchemyError as e:
-        db.rollback()
-        logger.error(f"Error marking message as delivered: {e}")
-        return False
-
-
-def delete_delivered_messages(db: Session, user_username: str = None) -> int:
-    try:
-        query = db.query(DbPendingMessage).filter(DbPendingMessage.delivered == True)
-
-        if user_username:
-            query = query.filter(DbPendingMessage.recipient_username == user_username)
-
-        messages = query.all()
-        count = len(messages)
-
-        for message in messages:
-            db.delete(message)
-
-        db.commit()
-        
-        if user_username:
-            logger.info(f"Deleted {count} delivered messages for user {user_username}")
         else:
-            logger.info(f"Deleted {count} delivered messages")
-            
-        return count
-        
+            logger.warning(f"Message {message_id} not found for delivery marking/deletion")
+            return False
+
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"Error deleting delivered messages: {e}")
-        return 0
+        logger.error(f"SQLAlchemyError marking/deleting message {message_id} as delivered: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error in mark_message_delivered for {message_id}: {e}")
+        return False
 
 
 

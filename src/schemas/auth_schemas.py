@@ -18,3 +18,4 @@ class Token(BaseModel):
     token_type: str
     username: str
     display_name: str
+    refresh_token: str

@@ -29,59 +29,71 @@ async def create_message(
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    message_id = str(uuid.uuid4())  # Use UUID to generate a unique ID
+    message_id = str(uuid.uuid4())
 
-    connection = connection_manager.get_connection(message_data.recipient_username)
-    
-    if connection:
-        try:
-            logger.info(f"Attempting to send message via WebSocket to {message_data.recipient_username}")
-            await connection.send_text(json.dumps({
-                "type": "new_message",
-                "data": {
-                    "id": message_id,
-                    "sender_username": current_user.username,
-                    "recipient_username": message_data.recipient_username,
-                    "text": message_data.text,
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "is_delivered": True
-                }
-            }))
-            logger.info(f"Message delivered via WebSocket to {message_data.recipient_username}")
-            return MessageResponse(
-                id=message_id,
-                sender_username=current_user.username,
-                recipient_username=message_data.recipient_username,
-                text=message_data.text,
-                created_at=datetime.now(UTC),
-                is_delivered=True
-            )
-        except Exception as e:
-            logger.error(f"Error delivering message via WebSocket: {e}")
-    
-    logger.info(f"WebSocket delivery failed or recipient offline, saving message to database for {message_data.recipient_username}")
+    # 1. Always save the message to the database first
+    # This ensures we get the definitive database timestamp
     saved_message = send_message(
-        db, 
-        current_user.username, 
-        message_data.recipient_username, 
+        db,
+        current_user.username,
+        message_data.recipient_username,
         message_data.text,
         message_id=message_id
     )
-    
+
+    # Handle potential failure during saving (e.g., not friends)
     if not saved_message:
         logger.error(f"Failed to save message from {current_user.username} to {message_data.recipient_username}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to send message. Check that you are friends with the recipient."
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send message. Ensure you are friends with the recipient."
         )
-    
+
+    # 2. Check if recipient is online AFTER saving
+    connection = connection_manager.get_connection(message_data.recipient_username)
+    is_delivered_response = False  # Default delivery status for the HTTP response
+
+    if connection:
+        logger.info(f"Recipient {message_data.recipient_username} is online. Attempting direct WS send for message {saved_message.id}.")
+        try:
+            # 3. Attempt WebSocket send using data from the saved DB record
+            await connection.send_text(json.dumps({
+                "type": "new_message",
+                "data": {
+                    "id": saved_message.id,
+                    "sender_username": saved_message.sender_username,
+                    "recipient_username": saved_message.recipient_username,
+                    "text": saved_message.text,
+                    "created_at": saved_message.created_at.isoformat(), # Use DB timestamp
+                    # Mark as delivered in the WS payload itself since we are sending it now
+                    "is_delivered": True
+                }
+            }))
+            logger.info(f"Message {saved_message.id} sent via WebSocket to {message_data.recipient_username}")
+            # If WS send attempt occurred, mark HTTP response as delivered=true
+            is_delivered_response = True
+            # Note: We don't necessarily need to update the DB delivered status here.
+            # The client receiving the WS message should confirm delivery via POST /delivered/{id}
+            # Or, if we trust the WS send attempt, we could mark it here, but it might complicate offline recovery.
+            # Sticking to marking only the HTTP response based on connection status.
+
+        except Exception as e:
+            logger.error(f"Error sending message {saved_message.id} via WebSocket: {e}", exc_info=True)
+            # Even if WS fails, the message is saved. The HTTP response will be based on the DB record.
+            # Should is_delivered_response be true even if WS send fails?
+            # Let's keep it True if the connection *existed*, indicating an attempt was made.
+            is_delivered_response = True
+
+    # 4. Always construct the HTTP response using the saved database message
+    # This guarantees the timestamp consistency.
+    logger.info(f"Responding to POST /messages/ for message {saved_message.id} with is_delivered={is_delivered_response}")
     return MessageResponse(
         id=saved_message.id,
         sender_username=saved_message.sender_username,
         recipient_username=saved_message.recipient_username,
         text=saved_message.text,
-        created_at=saved_message.created_at,
-        is_delivered=saved_message.delivered
+        created_at=saved_message.created_at, # <<< Use consistent DB timestamp
+        is_delivered=is_delivered_response   # <<< Reflects immediate delivery *attempt* status
     )
 
 @router.post("/delivered/{message_id}", status_code=status.HTTP_200_OK)

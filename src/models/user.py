@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from typing import Optional
 
 from src.database import Base
 
@@ -14,6 +15,10 @@ class DbUser(Base):
     hashed_password = Column(String)
     last_seen = Column(DateTime, default=func.now(), onupdate=func.now())
     created_at = Column(DateTime, default=func.now())
+
+    # Fields for refresh token storage
+    hashed_refresh_token = Column(String, nullable=True)
+    refresh_token_expires_at = Column(DateTime, nullable=True)
 
     sent_friend_requests = relationship(
         "DbFriendRequest",
