@@ -112,7 +112,7 @@ async def respond_to_friend_request(
     try:
         if action_data.action == "accept":
             friendship = accept_friend_request(db, action_data.request_id, current_user.username)
-            friend_username = friendship.sender_username if friendship.recipient_username != current_user.username else friendship.recipient_username
+            friend_username = friendship.user1_username if friendship.user2_username != current_user.username else friendship.user2_username
             friend = db.query(DbUser).filter(DbUser.username == friend_username).first()
             logger.info(f"User {current_user.username} accepted friend request from {friend_username}")
             return friend

@@ -202,9 +202,9 @@ async def send_pending_messages(websocket: WebSocket, username: str, db: Session
             }))
 
             logger.info(f"Sent pending message {message.id} to {username} via WebSocket")
-            mark_message_delivered(db, str(message.id))
+            
             sent_count += 1
-            logger.info(f"Marked pending message {message.id} as delivered for {username}")
+            logger.info(f"Pending message {message.id} sent to {username}, awaiting client acknowledgment.")
 
         except Exception as e:
             logger.error(f"Failed to send pending message {message.id} to {username}: {e}")

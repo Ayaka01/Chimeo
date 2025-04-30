@@ -51,10 +51,11 @@ async def register(
         token_response = create_and_store_tokens(db=db, user=user)
         return token_response
 
+    except APIError as e:
+        raise e
+
     except Exception as e:
         logger.error(f"Unexpected error during registration: {e}", exc_info=True)
-        if isinstance(e, APIError):
-             raise e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Registration failed due to an unexpected internal error"
