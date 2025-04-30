@@ -7,18 +7,11 @@ from src.database import get_db
 from src.models.user import DbUser
 from src.models.friendship import DbFriendRequest
 from src.services.auth_service import get_current_user
-from src.services.friendship_service import (
-    create_friend_request,
-    accept_friend_request,
-    reject_friend_request,
-    get_user_friends,
-    get_user_friend_requests,
-    get_sent_friend_requests,
-    search_users_by_query
-)
 from src.config import USERS_ENDPOINTS_HTML
 import logging
 
+from src.services.users_service import search_users_by_query, get_user_friends, create_friend_request, \
+    accept_friend_request, reject_friend_request, get_user_friend_requests, get_sent_friend_requests
 from src.utils.exceptions import APIError
 
 logger = logging.getLogger(__name__)
@@ -73,31 +66,32 @@ async def send_friend_request(
     logger.info(f"User {current_user.username} is sending friend request to {request_data.username}")
     try:
         response = create_friend_request(db, current_user.username, request_data.username)
-    except APIError as e:
-        logger.warning(f"Friend request from {current_user.username} to {request_data.username} failed: {str(e)}")
+
+        if isinstance(response, DbFriendRequest):
+            logger.info(f"Friend request from {current_user.username} to {request_data.username} created")
+            return FriendRequestResponse(
+                id=response.id,
+                sender_username=current_user.username,
+                status="pending",
+                recipient_username=request_data.username
+            )
+        else:
+            logger.info(f"Friend request from {current_user.username} to {request_data.username} automatically accepted")
+            return FriendRequestResponse(
+                id=getattr(response, 'id', 'unknown'),
+                sender_username=current_user.username,
+                status="accepted",
+                recipient_username=request_data.username
+            )
+
+    except Exception as e:
+        logger.error(f"Unexpected error sending friend request from {current_user.username} to {request_data.username}: {e}", exc_info=True)
+        if isinstance(e, APIError):
+            raise e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to send friend request due to an unexpected internal error"
         )
-
-    if isinstance(response, DbFriendRequest):
-        logger.info(f"Friend request from {current_user.username} to {request_data.username} created")
-        return FriendRequestResponse(
-            id=response.id,
-            sender_username=current_user.username,
-            status="pending",
-            recipient_username=request_data.username
-        )
-
-    else:
-        logger.info(f"Friend request from {current_user.username} to {request_data.username} automatically accepted")
-        return FriendRequestResponse(
-            id=response.id,
-            sender_username=current_user.username,
-            status="accepted",
-            recipient_username=request_data.username
-        )
-
 
 
 @router.post("/friends/respond", 
@@ -115,40 +109,34 @@ async def respond_to_friend_request(
     db: Session = Depends(get_db)
 ):
     logger.info(f"User {current_user.username} is responding to friend request {action_data.request_id} with action: {action_data.action}")
-    if action_data.action == "accept":
-        friendship = accept_friend_request(db, action_data.request_id, current_user.username)
+    try:
+        if action_data.action == "accept":
+            friendship = accept_friend_request(db, action_data.request_id, current_user.username)
+            friend_username = friendship.sender_username if friendship.recipient_username != current_user.username else friendship.recipient_username
+            friend = db.query(DbUser).filter(DbUser.username == friend_username).first()
+            logger.info(f"User {current_user.username} accepted friend request from {friend_username}")
+            return friend
 
-        if not friendship:
-            logger.warning(f"User {current_user.username} failed to accept friend request {action_data.request_id}")
+        elif action_data.action == "reject":
+            result = reject_friend_request(db, action_data.request_id, current_user.username)
+            user = db.query(DbUser).filter(DbUser.username == result.sender_username).first()
+            logger.info(f"User {current_user.username} rejected friend request from {result.sender_username}")
+            return user
+
+        else:
+            logger.warning(f"User {current_user.username} provided invalid action for friend request: {action_data.action}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Could not accept friend request"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid action. Must be 'accept' or 'reject'"
             )
 
-        friend_username = friendship.sender_username if friendship.recipient_username != current_user.username else friendship.recipient_username
-        friend = db.query(DbUser).filter(DbUser.username == friend_username).first()
-        logger.info(f"User {current_user.username} accepted friend request from {friend_username}")
-        return friend
-
-    elif action_data.action == "reject":
-        result = reject_friend_request(db, action_data.request_id, current_user.username)
-
-        if not result:
-            logger.warning(f"User {current_user.username} failed to reject friend request {action_data.request_id}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Could not reject friend request"
-            )
-
-        user = db.query(DbUser).filter(DbUser.username == result.sender_username).first()
-        logger.info(f"User {current_user.username} rejected friend request from {result.sender_username}")
-        return user
-
-    else:
-        logger.warning(f"User {current_user.username} provided invalid action for friend request: {action_data.action}")
+    except Exception as e:
+        logger.error(f"Unexpected error responding to friend request {action_data.request_id} for user {current_user.username}: {e}", exc_info=True)
+        if isinstance(e, APIError):
+            raise e
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid action. Must be 'accept' or 'reject'"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to respond to friend request due to an unexpected internal error"
         )
 
 
@@ -167,7 +155,6 @@ async def get_received_friend_requests(
     return _db_friend_request_to_friend_request_response(requests)
 
 
-
 @router.get("/friends/requests/sent", 
             response_model=List[FriendRequestResponse],
             responses={
@@ -177,7 +164,7 @@ def get_sent_friend_requests_route(
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    logger.info(f"User {current_user.username} requested sent friend requests with status filter: {status}")
+    logger.info(f"User {current_user.username} requested sent friend requests with status filter: PENDING")
     requests = get_sent_friend_requests(db, current_user.username)
     return _db_friend_request_to_friend_request_response(requests)
 

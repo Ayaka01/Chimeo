@@ -114,6 +114,7 @@ def create_and_store_tokens(db: Session, user: DbUser) -> Token:
 
     user.hashed_refresh_token = hashed_refresh
     user.refresh_token_expires_at = refresh_expire_time
+    user.last_seen = datetime.now(UTC)
 
     try:
         db.commit()
@@ -134,7 +135,7 @@ def create_and_store_tokens(db: Session, user: DbUser) -> Token:
 
 def refresh_access_token(db: Session, provided_refresh_token: str) -> Token:
     try:
-        payload = decode_access_token(provided_refresh_token)
+        payload = jwt.decode(provided_refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
             logger.warning("Refresh token missing 'sub' claim.")
@@ -175,7 +176,38 @@ def refresh_access_token(db: Session, provided_refresh_token: str) -> Token:
              logger.error(f"Error clearing mismatched refresh token for {username}: {db_err}")
         raise AuthenticationError(detail="Invalid refresh token.")
 
-    return create_and_store_tokens(db, user)
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    new_access_token = create_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+
+    refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    new_refresh_token = create_token(
+        data={"sub": user.username}, expires_delta=refresh_token_expires
+    )
+    new_refresh_expire_time = datetime.now(UTC) + refresh_token_expires
+    
+    new_hashed_refresh = get_token_hash(new_refresh_token)
+    user.hashed_refresh_token = new_hashed_refresh
+    user.refresh_token_expires_at = new_refresh_expire_time
+
+    user.last_seen = datetime.now(UTC)
+    try:
+        db.commit()
+        db.refresh(user)
+        logger.info(f"Tokens refreshed (rotation) for user: {user.username}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating tokens/last_seen during token refresh for {user.username}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update session after token refresh.")
+
+    return Token(
+        access_token=new_access_token,
+        refresh_token=new_refresh_token,
+        token_type="bearer",
+        username=user.username,
+        display_name=user.display_name
+    )
 
 
 def decode_access_token(token: str):
@@ -195,7 +227,7 @@ async def get_current_user(db: Session = Depends(get_db), token: str = Depends(o
     )
 
     try:
-        payload = decode_access_token(token)
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
              logger.warning("Access token missing 'sub' claim.")
