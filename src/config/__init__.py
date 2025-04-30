@@ -6,10 +6,6 @@ from src.config.settings import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     HOST,
     PORT,
-    CORS_ENABLED,
-    CORS_ORIGINS,
-    CORS_METHODS,
-    CORS_HEADERS,
     WS_HEARTBEAT_INTERVAL,
     DEBUG
 )
@@ -31,10 +27,6 @@ __all__ = [
     "REFRESH_TOKEN_EXPIRE_DAYS",
     "HOST",
     "PORT",
-    "CORS_ENABLED",
-    "CORS_ORIGINS",
-    "CORS_METHODS",
-    "CORS_HEADERS",
     "WS_HEARTBEAT_INTERVAL",
     "DEBUG",
     "configure_logging",

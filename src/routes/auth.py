@@ -2,7 +2,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
-from src.schemas.auth_schemas import UserCreate, LoginRequest, Token
+
+from src.models.user import DbUser
+from src.schemas.auth_schemas import UserCreate, LoginRequest, Token, RefreshTokenRequest
 from pydantic import BaseModel # For refresh token request body
 
 from src.database import get_db
@@ -30,18 +32,17 @@ async def auth_root():
              response_model=Token,
              status_code=status.HTTP_201_CREATED,
              responses= {
-                 status.HTTP_400_BAD_REQUEST: {"description": "Username/Email already exists or validation failed"},
+                 status.HTTP_400_BAD_REQUEST: {"description": "Username/Email already exists"},
                  status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal Server Error"},
              }
              )
 async def register(
-    _: Request,
     user_data: UserCreate, 
     db: Session = Depends(get_db)
 ):
     try:
         logger.info(f"Registering user with email: {user_data.email}")
-        user = create_user(
+        user: DbUser = create_user(
             db=db,
             username=user_data.username,
             email=str(user_data.email),
@@ -97,9 +98,6 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
-
 @router.post("/refresh", 
              response_model=Token,
              responses={
@@ -114,6 +112,7 @@ async def refresh_token(
         logger.info("Attempting to refresh access token.")
         new_token_response = refresh_access_token(db=db, provided_refresh_token=refresh_request.refresh_token)
         return new_token_response
+
     except AuthenticationError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

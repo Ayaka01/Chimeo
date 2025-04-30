@@ -14,7 +14,6 @@ class DbPendingMessage(Base):
     recipient_username = Column(String, ForeignKey("users.username"), index=True, nullable=False)
     text = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    delivered = Column(Boolean, default=False, nullable=False)
 
     sender = relationship("DbUser", foreign_keys=sender_username)
     recipient = relationship("DbUser", foreign_keys=recipient_username)

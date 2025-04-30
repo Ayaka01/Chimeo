@@ -14,7 +14,6 @@ class MessageResponse(BaseModel):
     recipient_username: str
     text: str
     created_at: datetime
-    is_delivered: bool
 
     class Config:
         from_attributes = True 

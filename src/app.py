@@ -1,16 +1,16 @@
 import logging
 import time
+from typing import Any
+
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import HTMLResponse
 
 from src.database import engine, Base
 from src.routes import users, messages, auth
-from src.config import CORS_ENABLED, CORS_ORIGINS, CORS_METHODS, CORS_HEADERS, API_DESCRIPTION, configure_logging, \
+from src.config import API_DESCRIPTION, configure_logging, \
     DEBUG, LANDING_PAGE_HTML, HOST, PORT
-from src.utils.error_handler import handle_validation_error
 from src.utils.exceptions import APIError
 
 def create_application() -> FastAPI:
@@ -36,18 +36,6 @@ def create_application() -> FastAPI:
         ],
     )
 
-    if CORS_ENABLED:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=CORS_ORIGINS,
-            allow_credentials=True,
-            allow_methods=CORS_METHODS,
-            allow_headers=CORS_HEADERS,
-        )
-        logger.info(f"CORS enabled with origins: {CORS_ORIGINS}")
-    else:
-        logger.info("CORS disabled")
-
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         start_time = time.time()
@@ -70,7 +58,7 @@ def create_application() -> FastAPI:
         logger.warning(f"Validation error: {exc}")
         return JSONResponse(
             status_code=422,
-            content=handle_validation_error(exc),
+            content=__handle_validation_error(exc),
         )
 
     @app.exception_handler(APIError)
@@ -103,16 +91,27 @@ def init_database():
     logger.info("Initializing database...")
     Base.metadata.create_all(bind=engine)
 
+def __handle_validation_error(exc: RequestValidationError) -> dict[str, Any]:
+    error_details = []
+    for error in exc.errors():
+        error_details.append(
+            {
+                "location": ".".join(map(str, error["loc"])),
+                "message": error["msg"],
+                "type": error["type"],
+            }
+        )
+    return {"detail": "Validation Error", "errors": error_details}
+
 configure_logging(level=logging.DEBUG if DEBUG else logging.INFO)
 logger = logging.getLogger(__name__)
 app = create_application()
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    logger.info("Root endpoint accessed")
-    return HTMLResponse(content=LANDING_PAGE_HTML)
 
 logger.info("Starting Chimeo API")
 init_database()
 
 logger.info(f"Starting server on {HOST}:{PORT}")
-
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    logger.info("Root endpoint accessed")
+    return HTMLResponse(content=LANDING_PAGE_HTML)

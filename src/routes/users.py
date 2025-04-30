@@ -31,7 +31,11 @@ async def users_root():
     return HTMLResponse(content=USERS_ENDPOINTS_HTML)
 
 
-@router.get("/search", response_model=List[UserResponse])
+@router.get("/search", 
+            response_model=List[UserResponse],
+            responses={
+                status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"}
+            })
 async def search_users(
     q: str = Query(..., min_length=3),
     db: Session = Depends(get_db),
@@ -41,7 +45,11 @@ async def search_users(
     return search_users_by_query(db, q, current_user.username)
 
 
-@router.get("/friends", response_model=List[UserResponse])
+@router.get("/friends", 
+            response_model=List[UserResponse],
+            responses={
+                status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"}
+            })
 async def get_friends(
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -50,7 +58,13 @@ async def get_friends(
     return get_user_friends(db, current_user.username)
 
 
-@router.post("/friends/request", response_model=FriendRequestResponse)
+@router.post("/friends/request", 
+             response_model=FriendRequestResponse,
+             responses={
+                 status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"},
+                 status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Validation Error (e.g., invalid username format)"},
+                 status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Friend request failed (e.g., DB error, already friends/requested)"}
+             })
 async def send_friend_request(
     request_data: FriendRequestCreate,
     current_user: DbUser = Depends(get_current_user),
@@ -86,7 +100,15 @@ async def send_friend_request(
 
 
 
-@router.post("/friends/respond", response_model=UserResponse)
+@router.post("/friends/respond", 
+             response_model=UserResponse,
+             responses={
+                 status.HTTP_400_BAD_REQUEST: {"description": "Invalid action ('accept' or 'reject')"},
+                 status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"},
+                 status.HTTP_404_NOT_FOUND: {"description": "Friend request not found"},
+                 status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Validation Error"},
+                 status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Could not accept/reject friend request (e.g., DB error, request invalid state)"}
+             })
 async def respond_to_friend_request(
     action_data: FriendRequestAction,
     current_user: DbUser = Depends(get_current_user),
@@ -103,7 +125,7 @@ async def respond_to_friend_request(
                 detail="Could not accept friend request"
             )
 
-        friend_username = friendship.user1_username if friendship.user1_username != current_user.username else friendship.user2_username
+        friend_username = friendship.sender_username if friendship.recipient_username != current_user.username else friendship.recipient_username
         friend = db.query(DbUser).filter(DbUser.username == friend_username).first()
         logger.info(f"User {current_user.username} accepted friend request from {friend_username}")
         return friend
@@ -130,7 +152,11 @@ async def respond_to_friend_request(
         )
 
 
-@router.get("/friends/requests/received", response_model=List[FriendRequestResponse])
+@router.get("/friends/requests/received", 
+            response_model=List[FriendRequestResponse],
+            responses={
+                status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"}
+            })
 async def get_received_friend_requests(
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -138,21 +164,25 @@ async def get_received_friend_requests(
     logger.info(f"User {current_user.username} requested received friend requests with status filter: PENDING")
     requests = get_user_friend_requests(db, current_user.username)
 
-    return _DbFriendRequestToFriendRequestResponse(requests)
+    return _db_friend_request_to_friend_request_response(requests)
 
 
 
-@router.get("/friends/requests/sent", response_model=List[FriendRequestResponse])
+@router.get("/friends/requests/sent", 
+            response_model=List[FriendRequestResponse],
+            responses={
+                status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"}
+            })
 def get_sent_friend_requests_route(  
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     logger.info(f"User {current_user.username} requested sent friend requests with status filter: {status}")
     requests = get_sent_friend_requests(db, current_user.username)
-    return _DbFriendRequestToFriendRequestResponse(requests)
+    return _db_friend_request_to_friend_request_response(requests)
 
 
-def _DbFriendRequestToFriendRequestResponse(requests: List[DbFriendRequest]) -> List[FriendRequestResponse]:
+def _db_friend_request_to_friend_request_response(requests: List[DbFriendRequest]) -> List[FriendRequestResponse]:
     result = []
     for request in requests:
         result.append(FriendRequestResponse(
