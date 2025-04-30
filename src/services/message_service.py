@@ -5,11 +5,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.pending_message import DbPendingMessage
-from src.utils.websocket_manager import connection_manager
 
 logger = logging.getLogger(__name__)
 
-def send_message(
+def save_message(
     db: Session, 
     sender_username: str, 
     recipient_username: str, 

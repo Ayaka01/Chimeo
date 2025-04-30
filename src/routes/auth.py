@@ -68,8 +68,7 @@ async def register(
                  status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error or failed to store token"}
              })
 async def login(
-    _: Request,
-    login_data: LoginRequest, 
+    login_data: LoginRequest,
     db: Session = Depends(get_db)
 ):
     try:

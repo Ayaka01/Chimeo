@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, UTC, timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -154,7 +154,8 @@ def refresh_access_token(db: Session, provided_refresh_token: str) -> Token:
         logger.warning(f"User '{username}' has no stored refresh token.")
         raise AuthenticationError(detail="Refresh token not found or revoked.")
 
-    if datetime.now(UTC) > user.refresh_token_expires_at:
+    expires_at_utc_aware = user.refresh_token_expires_at.replace(tzinfo=timezone.utc)
+    if datetime.now(UTC) > expires_at_utc_aware:
         logger.warning(f"Refresh token expired for user '{username}'.")
         user.hashed_refresh_token = None
         user.refresh_token_expires_at = None

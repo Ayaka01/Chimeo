@@ -11,18 +11,16 @@ from src.models.pending_message import DbPendingMessage
 from src.schemas.messages_schemas import MessageCreate, MessageResponse
 from src.services.auth_service import get_current_user, decode_access_token
 from src.services.message_service import (
-    send_message,
     get_pending_messages,
-    mark_message_delivered,
+    mark_message_delivered, save_message,
 )
 from src.utils.websocket_manager import connection_manager
-from src.utils.exceptions import APIError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
-@router.post("/", 
+@router.post("/",
             response_model=MessageResponse,
             responses={
                 status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"},
@@ -34,52 +32,53 @@ async def create_message(
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> MessageResponse:
-    try:
-        saved_message: DbPendingMessage = send_message(
-            db,
-            current_user.username,
-            message_data.recipient_username,
-            message_data.text,
-        )
-        
-        connection = connection_manager.get_connection(message_data.recipient_username)
+    saved_message: DbPendingMessage = save_message(
+        db,
+        current_user.username,
+        message_data.recipient_username,
+        message_data.text,
+    )
 
-        if connection is not None:
-            logger.info(f"Recipient {message_data.recipient_username} is online. Attempting direct WS send for message {saved_message.id}.")
-            try:
-                await connection.send_text(json.dumps({
-                    "type": "new_message",
-                    "data": {
-                        "id": saved_message.id,
-                        "sender_username": saved_message.sender_username,
-                        "recipient_username": saved_message.recipient_username,
-                        "text": saved_message.text,
-                        "created_at": saved_message.created_at.isoformat(),
-                    }
-                }))
-                logger.info(f"Message {saved_message.id} sent via WebSocket to {message_data.recipient_username}")
-            except Exception as ws_e:
-                logger.error(f"Error sending message {saved_message.id} via WebSocket: {ws_e}", exc_info=True)
-
-        logger.info(f"Responding to POST /messages/ for message {saved_message.id}")
-        return MessageResponse(
-            id=saved_message.id,
-            sender_username=saved_message.sender_username,
-            recipient_username=saved_message.recipient_username,
-            text=saved_message.text,
-            created_at=saved_message.created_at,
-        )
-        
-    except Exception as e:
-        logger.error(f"Unexpected error creating message from {current_user.username} to {message_data.recipient_username}: {e}", exc_info=True)
-        if isinstance(e, APIError):
-            raise e
+    if not saved_message:
+        logger.error(f"Failed to save message from {current_user.username} to {message_data.recipient_username}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send message due to an unexpected internal error."
+            detail="Failed to send message."
         )
 
-@router.post("/delivered/{message_id}", 
+    connection = connection_manager.get_connection(message_data.recipient_username)
+
+    # If recipient is online
+    if connection is not None:
+        logger.info(f"Recipient {message_data.recipient_username} is online. Attempting direct WS send for message {saved_message.id}.")
+        try:
+            # Send message to recipient via webSocket
+            await connection.send_text(json.dumps({
+                "type": "new_message",
+                "data": {
+                    "id": saved_message.id,
+                    "sender_username": saved_message.sender_username,
+                    "recipient_username": saved_message.recipient_username,
+                    "text": saved_message.text,
+                    "created_at": saved_message.created_at.isoformat(),
+                }
+            }))
+            logger.info(f"Message {saved_message.id} sent via WebSocket to {message_data.recipient_username}")
+
+
+        except Exception as e:
+            logger.error(f"Error sending message {saved_message.id} via WebSocket: {e}", exc_info=True)
+
+    logger.info(f"Responding to POST /messages/ for message {saved_message.id}")
+    return MessageResponse(
+        id=saved_message.id,
+        sender_username=saved_message.sender_username,
+        recipient_username=saved_message.recipient_username,
+        text=saved_message.text,
+        created_at=saved_message.created_at,
+    )
+
+@router.post("/delivered/{message_id}",
              status_code=status.HTTP_204_NO_CONTENT,
              responses={
                  status.HTTP_401_UNAUTHORIZED: {"description": "Not authenticated"},
@@ -92,30 +91,26 @@ async def mark_message_as_delivered(
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> None:
-    try:
-        message = mark_message_delivered(db, message_id)
-        
-        if message.recipient_username != current_user.username:
-            logger.warning(f"User {current_user.username} attempted to mark message {message_id} for recipient {message.recipient_username}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot mark message as delivered for another user."
-            )
+    message = mark_message_delivered(db, message_id)
 
-        background_tasks.add_task(
-            connection_manager.send_personal_message,
-            {"type": "message_delivered", "data": {"message_id": message_id}},
-            message.sender_username
-        )
-
-    except Exception as e:
-        logger.error(f"Unexpected error marking message {message_id} as delivered for user {current_user.username}: {e}", exc_info=True)
-        if isinstance(e, APIError):
-            raise e
+    if not message:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to mark message as delivered due to an unexpected internal error"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found or cannot be marked as delivered."
         )
+
+    if message.recipient_username != current_user.username:
+        logger.warning(f"User {current_user.username} attempted to mark message {message_id} for recipient {message.recipient_username}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot mark message as delivered for another user."
+        )
+
+    background_tasks.add_task(
+        connection_manager.send_personal_message,
+        {"type": "message_delivered", "data": {"message_id": message_id}},
+        message.sender_username
+    )
 
 @router.get("/pending", 
             response_model=List[MessageResponse],
