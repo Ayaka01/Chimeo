@@ -11,9 +11,8 @@ from src.models.pending_message import DbPendingMessage
 from src.schemas.messages_schemas import MessageCreate, MessageResponse
 from src.services.auth_service import get_current_user, decode_access_token
 from src.services.message_service import (
-    send_message,
     get_pending_messages,
-    mark_message_delivered,
+    mark_message_delivered, save_message,
 )
 from src.utils.websocket_manager import connection_manager
 
@@ -33,7 +32,7 @@ async def create_message(
     current_user: DbUser = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> MessageResponse:
-    saved_message: DbPendingMessage = send_message(
+    saved_message: DbPendingMessage = save_message(
         db,
         current_user.username,
         message_data.recipient_username,

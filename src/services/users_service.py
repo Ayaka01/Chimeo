@@ -103,7 +103,7 @@ def create_friend_request(db: Session, sender_username: str, recipient_username:
     return friend_request
 
 
-def accept_friend_request(db: Session, request_id: str, recipient_username: str) -> Type[DbFriendRequest] | None:
+def accept_friend_request(db: Session, request_id: str, recipient_username: str) -> DbFriendship | None:
     friend_request = db.query(DbFriendRequest).filter(DbFriendRequest.id == request_id).first()
 
     if not friend_request:

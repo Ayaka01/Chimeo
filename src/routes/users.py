@@ -5,9 +5,9 @@ from src.schemas.users_schemas import UserResponse, FriendRequestResponse, Frien
 from fastapi.responses import HTMLResponse
 from src.database import get_db
 from src.models.user import DbUser
-from src.models.friendship import DbFriendRequest
+from src.models.friendship import DbFriendship
 from src.services.auth_service import get_current_user
-from src.services.friendship_service import (
+from src.services.users_service import (
     create_friend_request,
     accept_friend_request,
     reject_friend_request,
@@ -40,7 +40,7 @@ async def search_users(
     q: str = Query(..., min_length=3),
     db: Session = Depends(get_db),
     current_user: DbUser = Depends(get_current_user),
-):
+) :
     logger.info(f"User {current_user.username} searching for users with query: {q}")
     return search_users_by_query(db, q, current_user.username)
 
@@ -80,23 +80,20 @@ async def send_friend_request(
             detail=str(e)
         )
 
-    if isinstance(response, DbFriendRequest):
-        logger.info(f"Friend request from {current_user.username} to {request_data.username} created")
-        return FriendRequestResponse(
-            id=response.id,
-            sender_username=current_user.username,
-            status="pending",
-            recipient_username=request_data.username
-        )
+    request_status = "pending"
 
-    else:
+    if isinstance(response, DbFriendship):
         logger.info(f"Friend request from {current_user.username} to {request_data.username} automatically accepted")
-        return FriendRequestResponse(
-            id=response.id,
-            sender_username=current_user.username,
-            status="accepted",
-            recipient_username=request_data.username
-        )
+        request_status = "accepted"
+    else:
+        logger.info(f"Friend request from {current_user.username} to {request_data.username} created")
+
+    return FriendRequestResponse(
+        id=response.id,
+        sender_username=current_user.username,
+        status=request_status,
+        recipient_username=request_data.username
+    )
 
 
 
@@ -116,7 +113,7 @@ async def respond_to_friend_request(
 ):
     logger.info(f"User {current_user.username} is responding to friend request {action_data.request_id} with action: {action_data.action}")
     if action_data.action == "accept":
-        friendship = accept_friend_request(db, action_data.request_id, current_user.username)
+        friendship: DbFriendship = accept_friend_request(db, action_data.request_id, current_user.username)
 
         if not friendship:
             logger.warning(f"User {current_user.username} failed to accept friend request {action_data.request_id}")
@@ -125,7 +122,7 @@ async def respond_to_friend_request(
                 detail="Could not accept friend request"
             )
 
-        friend_username = friendship.sender_username if friendship.recipient_username != current_user.username else friendship.recipient_username
+        friend_username = friendship.user1_username if friendship.user2_username != current_user.username else friendship.user2_username
         friend = db.query(DbUser).filter(DbUser.username == friend_username).first()
         logger.info(f"User {current_user.username} accepted friend request from {friend_username}")
         return friend
@@ -182,7 +179,7 @@ def get_sent_friend_requests_route(
     return _db_friend_request_to_friend_request_response(requests)
 
 
-def _db_friend_request_to_friend_request_response(requests: List[DbFriendRequest]) -> List[FriendRequestResponse]:
+def _db_friend_request_to_friend_request_response(requests) -> List[FriendRequestResponse]:
     result = []
     for request in requests:
         result.append(FriendRequestResponse(
